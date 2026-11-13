@@ -104,7 +104,10 @@ jobs:
         run: ./mvnw -B -ntp dependency:go-offline
 
       - name: Scan lockfiles
-        uses: aquasecurity/trivy-action@0.28.0
+        # Pinned by commit SHA, not tag: the un-prefixed 0.x tags this used to
+        # name were removed upstream, which failed the job at "Set up job", and
+        # a tag can be moved to different code where a SHA cannot.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           # Resolve the POM hierarchy from ~/.m2 rather than over the network.
           # Does not affect the vulnerability database, which still updates.

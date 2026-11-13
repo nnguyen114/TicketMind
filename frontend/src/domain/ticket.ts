@@ -88,6 +88,11 @@ export const VIEW_LABELS: Record<TicketView, string> = {
 export const TRIAGE_POLL_INTERVAL_MS = 3_000;
 export const TRIAGE_POLL_WINDOW_MS = 2 * 60 * 1_000;
 
+// How often open screens pick up other people's changes (a new ticket in the
+// queue, a reply on the ticket you are reading). ponytail: polling; switch to
+// server-sent events if 30s of lag starts to matter.
+export const LIVE_REFRESH_MS = 30_000;
+
 export type TriageState = 'done' | 'analyzing' | 'gave_up';
 
 /** Where automatic triage stands for a ticket, from its timestamps alone. */

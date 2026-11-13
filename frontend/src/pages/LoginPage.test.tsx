@@ -83,4 +83,30 @@ describe('LoginPage', () => {
     expect(await screen.findByText(/valid email/i)).toBeInTheDocument();
     expect(screen.getByText(/password is required/i)).toBeInTheDocument();
   });
+
+  it('sends an already signed-in user straight into the app', async () => {
+    server.use(
+      http.post(`${BASE}/auth/refresh`, () =>
+        HttpResponse.json({
+          accessToken: 'still-valid',
+          tokenType: 'Bearer',
+          expiresAt: new Date(Date.now() + 900_000).toISOString(),
+          user: {
+            id: '11111111-1111-1111-1111-111111111111',
+            email: 'a@example.com',
+            displayName: 'A',
+            role: 'USER',
+          },
+        }),
+      ),
+    );
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<div>home page</div>} />
+      </Routes>,
+      { route: '/login' },
+    );
+    expect(await screen.findByText('home page')).toBeInTheDocument();
+  });
 });

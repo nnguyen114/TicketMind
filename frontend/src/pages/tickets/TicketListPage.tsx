@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { listTickets, ticketKeys, type PagedTickets } from '@/api/tickets';
 import { useAuth } from '@/auth/useAuth';
 import { isStaff } from '@/domain/user';
-import { SUBMITTER_STATUS_LABELS, type TicketStatus } from '@/domain/ticket';
+import { LIVE_REFRESH_MS, SUBMITTER_STATUS_LABELS, type TicketStatus } from '@/domain/ticket';
 import { Icon, type IconName } from '@/components/icons';
 import { Button, ErrorText, LINK_BUTTON_CLASS, PageHeading } from '@/components/ui';
 import { formatRelative } from '@/lib/formatDate';
@@ -24,6 +24,7 @@ function MyTickets() {
   const query = useQuery({
     queryKey: ticketKeys.list({ view: 'ALL', sort: 'RECENTLY_UPDATED', page }),
     queryFn: () => listTickets({ sort: 'RECENTLY_UPDATED', page, size: PAGE_SIZE }),
+    refetchInterval: LIVE_REFRESH_MS,
   });
   const totalPages = query.data?.totalPages ?? 0;
 
@@ -48,7 +49,7 @@ function MyTickets() {
         </div>
       ) : (
         <ul className="flex flex-col gap-3">
-          {query.data.content.map((ticket) => (
+          {waitingFirst(query.data.content).map((ticket) => (
             <TicketCard key={ticket.id} ticket={ticket} />
           ))}
         </ul>
@@ -80,6 +81,18 @@ function MyTickets() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Tickets that need the submitter's reply go first; the rest keep the
+ * server's most-recently-updated order (sort is stable).
+ * ponytail: sorts within the page only; a server-side sort if a submitter ever
+ * has more than a page of tickets.
+ */
+function waitingFirst(tickets: PagedTickets['content']): PagedTickets['content'] {
+  return [...tickets].sort(
+    (a, b) => Number(b.status === 'WAITING') - Number(a.status === 'WAITING'),
   );
 }
 

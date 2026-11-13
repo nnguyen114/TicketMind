@@ -72,4 +72,28 @@ describe('CommentComposer', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/not allowed/i));
   });
+
+  it('sends on Cmd/Ctrl+Enter', async () => {
+    anonymousRefresh();
+    let received: string | null = null;
+    server.use(
+      http.post(`${BASE}/tickets/${TICKET_ID}/comments`, async ({ request }) => {
+        received = ((await request.json()) as { body: string }).body;
+        return HttpResponse.json({
+          id: '44444444-4444-4444-4444-444444444444',
+          eventType: 'COMMENT',
+          actor: null,
+          payload: JSON.stringify({ body: received }),
+          createdAt: new Date().toISOString(),
+        });
+      }),
+    );
+
+    renderWithProviders(<Composer />);
+    await userEvent.type(
+      await screen.findByLabelText(/^reply$/i),
+      'Quick one{Control>}{Enter}{/Control}',
+    );
+    await waitFor(() => expect(received).toBe('Quick one'));
+  });
 });

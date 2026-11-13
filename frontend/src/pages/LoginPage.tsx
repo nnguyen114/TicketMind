@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/auth/useAuth';
 import { ApiError } from '@/api/errors';
 import { FormField } from '@/components/FormField';
@@ -38,8 +38,7 @@ export function AuthCard({ title, children }: { title: string; children: ReactNo
 }
 
 export function LoginPage() {
-  const { login } = useAuth();
-  const navigate = useNavigate();
+  const { login, status } = useAuth();
   const location = useLocation();
   const [failure, setFailure] = useState<unknown>(null);
   const [wait, setWait] = useState<{ seconds: number } | null>(null);
@@ -62,7 +61,6 @@ export function LoginPage() {
     setFailure(null);
     try {
       await login(values);
-      navigate(from, { replace: true });
     } catch (error) {
       setFailure(error);
       if (error instanceof ApiError && error.retryAfterSeconds) {
@@ -70,6 +68,10 @@ export function LoginPage() {
       }
     }
   });
+
+  // Already signed in (a bookmark, the back button): straight into the app.
+  // This also performs the post-login redirect, since login() flips status.
+  if (status === 'authenticated') return <Navigate to={from} replace />;
 
   return (
     <AuthCard title="Sign in">

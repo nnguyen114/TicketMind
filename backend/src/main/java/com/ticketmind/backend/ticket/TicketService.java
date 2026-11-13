@@ -169,8 +169,20 @@ public class TicketService {
 		Ticket ticket = requireTicket(ticketId);
 		assertCanRead(actor, ticket);
 		User actorUser = userRepository.findById(actor.id()).orElseThrow();
-		return recordHistory(ticket, actorUser, TicketHistoryEventType.COMMENT, Map.of(
+		TicketHistory comment = recordHistory(ticket, actorUser, TicketHistoryEventType.COMMENT, Map.of(
 				"body", request.body().trim()));
+		// WAITING means "waiting on the submitter". Their reply hands the ticket
+		// back, so it returns to the agent's active work instead of sitting in
+		// "Waiting on customer" with the submitter still told a reply is needed.
+		boolean submitterReplied = ticket.getSubmitter() != null
+				&& ticket.getSubmitter().getId().equals(actor.id());
+		if (submitterReplied && ticket.getStatus() == TicketStatus.WAITING) {
+			ticket.changeStatus(TicketStatus.IN_PROGRESS, clock.instant());
+			recordHistory(ticket, actorUser, TicketHistoryEventType.STATUS_CHANGED, Map.of(
+					"from", TicketStatus.WAITING.name(),
+					"to", TicketStatus.IN_PROGRESS.name()));
+		}
+		return comment;
 	}
 
 	@Transactional(readOnly = true)

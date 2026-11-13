@@ -365,6 +365,30 @@ class TicketControllerIntegrationTest {
 				.andExpect(jsonPath("$.totalElements").value(expected));
 	}
 
+	@Test
+	void aSubmitterReplyHandsAWaitingTicketBackToTheAgent() throws Exception {
+		UUID id = createTicket(alice, "Waiting", "desc");
+		changeStatus(agent, id, TicketStatus.WAITING);
+
+		// A staff comment leaves it waiting: the ball is still with the submitter.
+		comment(agent, id, "Any update?");
+		assertThat(ticketRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TicketStatus.WAITING);
+
+		comment(alice, id, "Here it is.");
+		assertThat(ticketRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TicketStatus.IN_PROGRESS);
+		assertThat(historyRepository.findByTicketIdOrderByCreatedAtAsc(id))
+				.extracting(TicketHistory::getEventType)
+				.contains(TicketHistoryEventType.STATUS_CHANGED);
+	}
+
+	private void comment(User actor, UUID ticketId, String body) throws Exception {
+		mockMvc.perform(post("/tickets/" + ticketId + "/comments")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(actor))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(objectMapper.writeValueAsString(new AddCommentRequest(body))))
+				.andExpect(status().isCreated());
+	}
+
 	private void changeStatus(User actor, UUID ticketId, TicketStatus status) throws Exception {
 		mockMvc.perform(post("/tickets/" + ticketId + "/status")
 						.header(HttpHeaders.AUTHORIZATION, bearerFor(actor))

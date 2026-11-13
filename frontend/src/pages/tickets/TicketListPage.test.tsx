@@ -182,4 +182,34 @@ describe('TicketListPage', () => {
     await userEvent.keyboard('j');
     expect(row).toHaveFocus();
   });
+
+  it('puts tickets waiting on the submitter first', async () => {
+    authedRefresh('USER');
+    const base = ticketPage(undefined, 0);
+    const row = base.content[0]!;
+    server.use(
+      http.get(`${BASE}/tickets`, () =>
+        HttpResponse.json({
+          ...base,
+          totalPages: 1,
+          content: [
+            { ...row, id: '22222222-2222-2222-2222-222222222221', title: 'Newest, open' },
+            {
+              ...row,
+              id: '22222222-2222-2222-2222-222222222223',
+              title: 'Older, waiting',
+              status: 'WAITING',
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<TicketListPage />, { route: '/tickets' });
+    await screen.findByText('Older, waiting');
+    const titles = screen
+      .getAllByText(/^(Newest, open|Older, waiting)$/)
+      .map((el) => el.textContent);
+    expect(titles).toEqual(['Older, waiting', 'Newest, open']);
+  });
 });

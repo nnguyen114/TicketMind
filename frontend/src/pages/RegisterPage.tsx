@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '@/auth/useAuth';
 import { FormField } from '@/components/FormField';
 import { Icon } from '@/components/icons';
@@ -29,8 +29,7 @@ const schema = z
 type FormValues = z.infer<typeof schema>;
 
 export function RegisterPage() {
-  const { register: doRegister } = useAuth();
-  const navigate = useNavigate();
+  const { register: doRegister, status } = useAuth();
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -54,12 +53,14 @@ export function RegisterPage() {
   const onSubmit = handleSubmit(async ({ displayName, email, password: pw }) => {
     setServerError(null);
     try {
+      // Success flips status to authenticated, and the guard below redirects.
       await doRegister({ displayName, email, password: pw });
-      navigate('/', { replace: true });
     } catch (error) {
       setServerError(formatError(error));
     }
   });
+
+  if (status === 'authenticated') return <Navigate to="/" replace />;
 
   return (
     <AuthCard title="Create your account">

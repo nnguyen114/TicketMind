@@ -1,8 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { assignTicket, listTickets, ticketKeys, type PagedTickets } from '@/api/tickets';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  assignTicket,
+  listTickets,
+  ticketKeys,
+  type PagedTickets,
+  type TicketDetail,
+} from '@/api/tickets';
+import {
+  LIVE_REFRESH_MS,
   TICKET_SORTS,
   TICKET_VIEWS,
   triageState,
@@ -64,6 +71,7 @@ export function AgentWorkspace({ selectedId }: { selectedId?: string | undefined
   const tickets = useQuery({
     queryKey: ticketKeys.list({ view, sort, page }),
     queryFn: () => listTickets({ view, sort, page, size: PAGE_SIZE }),
+    refetchInterval: LIVE_REFRESH_MS,
   });
 
   const invalidateSelected = useInvalidateTicket(selectedId ?? '');
@@ -71,6 +79,10 @@ export function AgentWorkspace({ selectedId }: { selectedId?: string | undefined
     mutationFn: () => assignTicket(selectedId ?? '', user?.id ?? null),
     onSuccess: invalidateSelected,
   });
+  // useMutation's mutate is referentially stable, so the listener below is
+  // registered once per selection rather than on every render.
+  const assignMe = assignToMe.mutation.mutate;
+  const queryClient = useQueryClient();
 
   const update = (next: Record<string, string | null>) => {
     const nextParams = new URLSearchParams(params);
@@ -101,7 +113,9 @@ export function AgentWorkspace({ selectedId }: { selectedId?: string | undefined
       if (!selectedId) return;
       if (event.key === 'a' && user) {
         event.preventDefault();
-        assignToMe.mutation.mutate();
+        const open = queryClient.getQueryData<TicketDetail>(ticketKeys.detail(selectedId));
+        // Already yours: re-assigning would only add a duplicate history row.
+        if (open?.assignee?.id !== user.id) assignMe();
       } else if (event.key === 's' || event.key === 'r') {
         event.preventDefault();
         document.getElementById(event.key === 's' ? 'status-select' : 'comment')?.focus();
@@ -109,7 +123,7 @@ export function AgentWorkspace({ selectedId }: { selectedId?: string | undefined
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, user, assignToMe.mutation]);
+  }, [selectedId, user, assignMe, queryClient]);
 
   // On desktop the workspace is exactly the viewport under the header, so the
   // queue and the pane scroll on their own; flex-none stops flex-1 from

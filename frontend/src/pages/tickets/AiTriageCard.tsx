@@ -164,7 +164,7 @@ function Suggestion({
       {ticket.suggestedResolution ? (
         <div className="mt-1">
           <p className="mb-1 text-xs text-zinc-600">Suggested resolution</p>
-          <p className="whitespace-pre-wrap rounded-md bg-zinc-50 p-2.5 text-[13px] text-zinc-800">
+          <p className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md bg-zinc-50 p-2.5 text-[13px] text-zinc-800">
             {ticket.suggestedResolution}
           </p>
           <Button

@@ -16,7 +16,8 @@ public record TicketSummaryResponse(
 		UserSummary submitter,
 		UserSummary assignee,
 		Instant createdAt,
-		Instant updatedAt) {
+		Instant updatedAt,
+		Instant triagedAt) {
 
 	public static TicketSummaryResponse from(Ticket t) {
 		return new TicketSummaryResponse(
@@ -28,6 +29,7 @@ public record TicketSummaryResponse(
 				UserSummary.from(t.getSubmitter()),
 				UserSummary.from(t.getAssignee()),
 				t.getCreatedAt(),
-				t.getUpdatedAt());
+				t.getUpdatedAt(),
+				t.getTriagedAt());
 	}
 }

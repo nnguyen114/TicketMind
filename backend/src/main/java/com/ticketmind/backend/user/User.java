@@ -110,6 +110,16 @@ public class User {
 		this.role = next;
 	}
 
+	public void changeActive(boolean active) {
+		this.active = active;
+	}
+
+	/** Lets a locked-out user try again now instead of waiting out the lockout. */
+	public void unlock() {
+		this.failedLoginAttempts = 0;
+		this.lockedUntil = null;
+	}
+
 	public UUID getId() { return id; }
 	public String getEmail() { return email; }
 	public String getPasswordHash() { return passwordHash; }

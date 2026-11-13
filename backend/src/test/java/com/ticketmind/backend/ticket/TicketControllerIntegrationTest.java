@@ -327,6 +327,44 @@ class TicketControllerIntegrationTest {
 				.andExpect(status().isUnauthorized());
 	}
 
+	@Test
+	void savedViewsNarrowTheQueueAndSubmittersCannotUseThem() throws Exception {
+		UUID mine = createTicket(alice, "Mine", "desc");
+		UUID urgent = createTicket(alice, "Urgent", "desc");
+		UUID waiting = createTicket(bob, "Waiting", "desc");
+		UUID done = createTicket(bob, "Done", "desc");
+		mockMvc.perform(post("/tickets/" + mine + "/assign")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(agent))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(objectMapper.writeValueAsString(new AssignTicketRequest(agent.getId()))))
+				.andExpect(status().isOk());
+		Ticket t = ticketRepository.findById(urgent).orElseThrow();
+		t.applyTriage("Billing", TicketPriority.CRITICAL, "fix", java.time.Instant.now());
+		ticketRepository.saveAndFlush(t);
+		changeStatus(agent, waiting, TicketStatus.WAITING);
+		changeStatus(agent, done, TicketStatus.RESOLVED);
+
+		assertView("ALL", 4);
+		assertView("MINE", 1);
+		// Excludes the resolved one, and the one assigned to the agent.
+		assertView("UNASSIGNED", 2);
+		assertView("URGENT", 1);
+		assertView("WAITING", 1);
+		// Every active ticket but the one that was triaged.
+		assertView("UNTRIAGED", 2);
+
+		mockMvc.perform(get("/tickets?view=URGENT").header(HttpHeaders.AUTHORIZATION, bearerFor(alice)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(2))
+				.andExpect(jsonPath("$.content[?(@.title=='Urgent')].triagedAt").isNotEmpty());
+	}
+
+	private void assertView(String view, int expected) throws Exception {
+		mockMvc.perform(get("/tickets?view=" + view).header(HttpHeaders.AUTHORIZATION, bearerFor(agent)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(expected));
+	}
+
 	private void changeStatus(User actor, UUID ticketId, TicketStatus status) throws Exception {
 		mockMvc.perform(post("/tickets/" + ticketId + "/status")
 						.header(HttpHeaders.AUTHORIZATION, bearerFor(actor))

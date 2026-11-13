@@ -6,9 +6,10 @@ import {
   TICKET_STATUSES,
   type TicketSort,
   type TicketStatus,
+  type TicketView,
 } from '@/domain/ticket';
 
-export type { TicketPriority, TicketSort, TicketStatus } from '@/domain/ticket';
+export type { TicketPriority, TicketSort, TicketStatus, TicketView } from '@/domain/ticket';
 
 const ticketStatusSchema = z.enum(TICKET_STATUSES);
 const ticketPrioritySchema = z.enum(TICKET_PRIORITIES);
@@ -32,12 +33,12 @@ const ticketSummarySchema = z.object({
   assignee: userSummarySchema,
   createdAt: z.string(),
   updatedAt: z.string(),
+  triagedAt: z.string().nullable().optional(),
 });
 
 const ticketDetailSchema = ticketSummarySchema.extend({
   description: z.string(),
   suggestedResolution: z.string().nullable().optional(),
-  triagedAt: z.string().nullable().optional(),
   resolvedAt: z.string().nullable().optional(),
 });
 export type TicketDetail = z.infer<typeof ticketDetailSchema>;
@@ -62,6 +63,7 @@ export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 export type { TicketHistoryEvent } from '@/domain/ticket';
 
 interface ListParams {
+  view?: TicketView | undefined;
   status?: TicketStatus | undefined;
   sort?: TicketSort | undefined;
   page?: number;
@@ -73,7 +75,7 @@ interface ListParams {
 // the detail does not additionally need to name the history.
 export const ticketKeys = {
   all: ['tickets'] as const,
-  list: (params: { status: TicketStatus | null; sort: TicketSort; page: number }) =>
+  list: (params: { view: TicketView; sort: TicketSort; page: number }) =>
     ['tickets', params] as const,
   detail: (id: string) => ['ticket', id] as const,
   history: (id: string) => ['ticket', id, 'history'] as const,
@@ -90,6 +92,7 @@ async function parsed<T>(
 
 export async function listTickets(params: ListParams = {}): Promise<PagedTickets> {
   const search = new URLSearchParams();
+  if (params.view && params.view !== 'ALL') search.set('view', params.view);
   if (params.status) search.set('status', params.status);
   if (params.sort) search.set('sort', params.sort);
   if (params.page !== undefined) search.set('page', String(params.page));

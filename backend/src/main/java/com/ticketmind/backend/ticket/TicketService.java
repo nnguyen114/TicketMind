@@ -78,15 +78,26 @@ public class TicketService {
 
 	@Transactional(readOnly = true)
 	public Page<Ticket> list(
-			JwtPrincipal actor, TicketStatus status, TicketSort sort, int page, int size) {
+			JwtPrincipal actor, TicketView view, TicketStatus status, TicketSort sort, int page, int size) {
 		int safePage = Math.max(0, page);
 		int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
 		TicketSort safeSort = sort == null ? TicketSort.NEWEST : sort;
 		PageRequest pageRequest = PageRequest.of(safePage, safeSize, safeSort.sort());
 		// USER role only ever sees its own tickets, pin the submitter
 		// filter regardless of what the caller asked for.
-		UUID submitterFilter = actor.role().isStaff() ? null : actor.id();
-		return ticketRepository.search(status, submitterFilter, pageRequest);
+		boolean staff = actor.role().isStaff();
+		UUID submitterFilter = staff ? null : actor.id();
+		TicketView v = staff && view != null ? view : TicketView.ALL;
+		TicketStatus statusFilter = v == TicketView.WAITING ? TicketStatus.WAITING : status;
+		return ticketRepository.search(
+				statusFilter,
+				submitterFilter,
+				v == TicketView.MINE ? actor.id() : null,
+				v == TicketView.UNASSIGNED,
+				v == TicketView.URGENT,
+				v == TicketView.UNTRIAGED,
+				v != TicketView.ALL,
+				pageRequest);
 	}
 
 	@Transactional

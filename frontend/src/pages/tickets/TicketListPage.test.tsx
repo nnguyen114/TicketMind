@@ -27,12 +27,12 @@ function authedRefresh(role: 'USER' | 'AGENT' | 'ADMIN' = 'USER') {
   );
 }
 
-function ticketPage(status: string | undefined, page: number) {
+function ticketPage(status: string | undefined, page: number, view?: string) {
   return {
     content: [
       {
         id: '22222222-2222-2222-2222-222222222222',
-        title: `Ticket page ${page}${status ? ` (${status})` : ''}`,
+        title: `Ticket page ${page}${status ? ` (${status})` : ''}${view ? ` [${view}]` : ''}`,
         status: status ?? 'OPEN',
         priority: 'MEDIUM',
         category: null,
@@ -54,14 +54,12 @@ function ticketPage(status: string | undefined, page: number) {
 }
 
 describe('TicketListPage', () => {
-  it('lists tickets and paginates via query string', async () => {
+  it('shows a submitter their tickets as cards and paginates', async () => {
     authedRefresh('USER');
     server.use(
       http.get(`${BASE}/tickets`, ({ request }) => {
-        const url = new URL(request.url);
-        const page = Number(url.searchParams.get('page') ?? '0');
-        const status = url.searchParams.get('status') ?? undefined;
-        return HttpResponse.json(ticketPage(status, page));
+        const page = Number(new URL(request.url).searchParams.get('page') ?? '0');
+        return HttpResponse.json(ticketPage(undefined, page));
       }),
     );
 
@@ -73,19 +71,40 @@ describe('TicketListPage', () => {
     );
 
     expect(await screen.findByText('Ticket page 0')).toBeInTheDocument();
-    expect(screen.getByText(/Page 1 of 2 · 30 total/)).toBeInTheDocument();
+    expect(screen.getByText('Received')).toBeInTheDocument();
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByText('Ticket page 1')).toBeInTheDocument();
   });
 
-  it('filters by status when a chip is clicked', async () => {
+  it('flags a ticket that is waiting on the submitter', async () => {
+    authedRefresh('USER');
+    server.use(http.get(`${BASE}/tickets`, () => HttpResponse.json(ticketPage('WAITING', 0))));
+
+    renderWithProviders(<TicketListPage />, { route: '/tickets' });
+    expect(await screen.findByText('Waiting on you')).toBeInTheDocument();
+    expect(screen.getByText('Reply needed')).toBeInTheDocument();
+  });
+
+  it('renders an empty state when a submitter has no tickets', async () => {
+    authedRefresh('USER');
+    server.use(
+      http.get(`${BASE}/tickets`, () =>
+        HttpResponse.json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }),
+      ),
+    );
+
+    renderWithProviders(<TicketListPage />, { route: '/tickets' });
+    expect(await screen.findByText(/haven.t opened any tickets/i)).toBeInTheDocument();
+  });
+
+  it('sends the saved view an agent picks to the API', async () => {
     authedRefresh('AGENT');
     server.use(
       http.get(`${BASE}/tickets`, ({ request }) => {
-        const url = new URL(request.url);
-        const status = url.searchParams.get('status') ?? undefined;
-        return HttpResponse.json(ticketPage(status, 0));
+        const view = new URL(request.url).searchParams.get('view') ?? undefined;
+        return HttpResponse.json(ticketPage(undefined, 0, view));
       }),
     );
 
@@ -97,31 +116,15 @@ describe('TicketListPage', () => {
     );
 
     expect(await screen.findByText('Ticket page 0')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'In progress' }));
-    await waitFor(() =>
-      expect(screen.getByText(/Ticket page 0 \(IN_PROGRESS\)/)).toBeInTheDocument(),
+    await userEvent.click(screen.getByRole('tab', { name: 'Waiting on customer' }));
+    expect(await screen.findByText('Ticket page 0 [WAITING]')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Waiting on customer' })).toHaveAttribute(
+      'aria-selected',
+      'true',
     );
   });
 
-  it('renders an empty state when there are no tickets', async () => {
-    authedRefresh('USER');
-    server.use(
-      http.get(`${BASE}/tickets`, () =>
-        HttpResponse.json({
-          content: [],
-          page: 0,
-          size: 20,
-          totalElements: 0,
-          totalPages: 0,
-        }),
-      ),
-    );
-
-    renderWithProviders(<TicketListPage />, { route: '/tickets' });
-    expect(await screen.findByText(/haven't opened any tickets/i)).toBeInTheDocument();
-  });
-
-  it('sends the chosen sort to the API', async () => {
+  it('sorts the agent queue by urgency unless told otherwise', async () => {
     authedRefresh('AGENT');
     const seen: string[] = [];
     server.use(
@@ -138,11 +141,9 @@ describe('TicketListPage', () => {
       { route: '/tickets' },
     );
 
-    await waitFor(() => expect(seen).toContain('NEWEST'));
-
-    await userEvent.selectOptions(await screen.findByLabelText(/sort/i), 'PRIORITY_HIGH_FIRST');
-
     await waitFor(() => expect(seen).toContain('PRIORITY_HIGH_FIRST'));
+    await userEvent.selectOptions(await screen.findByLabelText(/sort/i), 'NEWEST');
+    await waitFor(() => expect(seen).toContain('NEWEST'));
   });
 
   it('restores the sort from the URL on load', async () => {
@@ -164,5 +165,21 @@ describe('TicketListPage', () => {
 
     await waitFor(() => expect(seen).toContain('PRIORITY_LOW_FIRST'));
     expect(await screen.findByLabelText(/sort/i)).toHaveValue('PRIORITY_LOW_FIRST');
+  });
+
+  it('moves focus down the queue with j', async () => {
+    authedRefresh('AGENT');
+    server.use(http.get(`${BASE}/tickets`, () => HttpResponse.json(ticketPage(undefined, 0))));
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/tickets" element={<TicketListPage />} />
+      </Routes>,
+      { route: '/tickets' },
+    );
+
+    const row = (await screen.findByText('Ticket page 0')).closest('a');
+    await userEvent.keyboard('j');
+    expect(row).toHaveFocus();
   });
 });

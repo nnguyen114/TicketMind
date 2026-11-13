@@ -28,15 +28,17 @@ function Field({
   children,
 }: FieldProps & { controlId: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={controlId} className="text-sm font-medium text-slate-700">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={controlId} className="font-semibold text-zinc-900">
         {label}
       </label>
       {children}
       {error ? (
         <ErrorText>{error}</ErrorText>
       ) : hint ? (
-        <p className="text-sm text-slate-500">{hint}</p>
+        <p id={`${controlId}-hint`} className="text-[13px] text-zinc-600">
+          {hint}
+        </p>
       ) : null}
     </div>
   );
@@ -58,6 +60,7 @@ export function FormField({
     <Field label={label} error={error} hint={hint} controlId={controlId}>
       <input
         id={controlId}
+        aria-describedby={hint && !error ? `${controlId}-hint` : undefined}
         {...inputProps}
         aria-invalid={error ? true : undefined}
         className={controlClass(error)}
@@ -78,6 +81,7 @@ export function FormTextArea({
     <Field label={label} error={error} hint={hint} controlId={controlId}>
       <textarea
         id={controlId}
+        aria-describedby={hint && !error ? `${controlId}-hint` : undefined}
         {...textareaProps}
         aria-invalid={error ? true : undefined}
         className={controlClass(error)}
@@ -99,9 +103,10 @@ export function FormSelect({
     <Field label={label} error={error} hint={hint} controlId={controlId}>
       <select
         id={controlId}
+        aria-describedby={hint && !error ? `${controlId}-hint` : undefined}
         {...selectProps}
         aria-invalid={error ? true : undefined}
-        className={`${controlClass(error)} disabled:bg-slate-100`}
+        className={controlClass(error)}
       >
         {children}
       </select>

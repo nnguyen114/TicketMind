@@ -28,7 +28,7 @@ function authedRefresh() {
 }
 
 describe('TicketCreatePage', () => {
-  it('submits and navigates to the new ticket detail page', async () => {
+  it('submits and lands on the confirmation page', async () => {
     authedRefresh();
     server.use(
       http.post(`${BASE}/tickets`, async ({ request }) => {
@@ -56,7 +56,7 @@ describe('TicketCreatePage', () => {
     renderWithProviders(
       <Routes>
         <Route path="/tickets/new" element={<TicketCreatePage />} />
-        <Route path="/tickets/:id" element={<div>ticket detail</div>} />
+        <Route path="/tickets/:id/submitted" element={<div>ticket submitted</div>} />
       </Routes>,
       { route: '/tickets/new' },
     );
@@ -65,7 +65,7 @@ describe('TicketCreatePage', () => {
     await userEvent.type(screen.getByLabelText(/description/i), 'I get a 500 error on submit.');
     await userEvent.click(screen.getByRole('button', { name: /submit ticket/i }));
 
-    expect(await screen.findByText('ticket detail')).toBeInTheDocument();
+    expect(await screen.findByText('ticket submitted')).toBeInTheDocument();
   });
 
   it('shows validation errors when submitted empty', async () => {

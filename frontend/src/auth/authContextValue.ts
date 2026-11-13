@@ -1,7 +1,9 @@
 import { createContext } from 'react';
 import type { AuthResponse, AuthenticatedUser, LoginRequest, RegisterRequest } from '@/api/auth';
 
-export type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
+// 'expired': the session ended underneath a signed-in user (refresh failed).
+// The user and the page stay put so a re-login keeps whatever they were typing.
+export type AuthStatus = 'loading' | 'authenticated' | 'expired' | 'anonymous';
 
 export interface AuthContextValue {
   status: AuthStatus;

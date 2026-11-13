@@ -49,23 +49,29 @@ describe('RegisterPage', () => {
 
     await userEvent.type(await screen.findByLabelText(/display name/i), 'New User');
     await userEvent.type(screen.getByLabelText(/email/i), 'new@example.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'hunter2hunter2');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'hunter2hunter2');
+    await userEvent.type(screen.getByLabelText(/confirm password/i), 'hunter2hunter2');
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     expect(await screen.findByText('home page')).toBeInTheDocument();
     expect(tokenStore.get()).toBe('signed-up-token');
   });
 
-  it('enforces the 12-char + letter + digit policy client-side', async () => {
+  it('ticks the password rules off as they are met and only then enables submit', async () => {
     anonymousRefresh();
     renderWithProviders(<RegisterPage />, { route: '/register' });
 
-    await userEvent.type(await screen.findByLabelText(/display name/i), 'A');
-    await userEvent.type(screen.getByLabelText(/email/i), 'good@example.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'shortpwd');
-    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
+    const submit = await screen.findByRole('button', { name: /create account/i });
+    const password = screen.getByLabelText(/^password$/i);
+    await userEvent.type(password, 'shortpwd');
+    expect(screen.getAllByRole('img', { name: 'Not yet' })).toHaveLength(2);
+    expect(submit).toBeDisabled();
 
-    expect(await screen.findByText(/at least 12 characters/i)).toBeInTheDocument();
+    await userEvent.type(password, 'long');
+    expect(screen.getAllByRole('img', { name: 'Done' })).toHaveLength(1);
+    await userEvent.type(screen.getByLabelText(/confirm password/i), 'shortpwdlong');
+    expect(screen.getAllByRole('img', { name: 'Done' })).toHaveLength(2);
+    expect(submit).toBeEnabled();
   });
 
   it('reports server-side errors from the envelope without leaking the raw message', async () => {
@@ -80,7 +86,8 @@ describe('RegisterPage', () => {
 
     await userEvent.type(await screen.findByLabelText(/display name/i), 'New User');
     await userEvent.type(screen.getByLabelText(/email/i), 'new@example.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'hunter2hunter2');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'hunter2hunter2');
+    await userEvent.type(screen.getByLabelText(/confirm password/i), 'hunter2hunter2');
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() =>

@@ -3,7 +3,8 @@ import { ApiError, NetworkError } from '@/api/errors';
 const codeMessages: Record<string, string> = {
   invalid_credentials: 'Email or password is incorrect.',
   email_already_registered: 'An account with that email already exists.',
-  account_locked: 'This account is temporarily locked. Try again shortly.',
+  account_locked:
+    'This account is locked after too many failed attempts. Try again in a few minutes.',
   password_policy: 'That password does not meet the security requirements.',
   invalid_refresh_token: 'Your session has expired. Please sign in again.',
   rate_limit_exceeded: 'Too many attempts. Please slow down and try again.',

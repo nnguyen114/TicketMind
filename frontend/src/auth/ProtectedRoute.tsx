@@ -13,7 +13,7 @@ export function ProtectedRoute({ children, roles }: Props) {
   const location = useLocation();
 
   if (status === 'loading') {
-    return <div className="p-8 text-slate-500">Loading…</div>;
+    return <div className="p-8 text-zinc-500">Loading…</div>;
   }
   if (status === 'anonymous' || !user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;

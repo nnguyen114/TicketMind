@@ -1,199 +1,147 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import {
   changeTicketStatus,
-  getHistory,
-  getTicket,
+  TICKET_BODY_MAX,
   TICKET_TITLE_MAX,
-  ticketKeys,
   updateTicket,
   type TicketDetail,
 } from '@/api/tickets';
-import { useInvalidateTicket } from './useInvalidateTicket';
-import { StatusBadge } from '@/components/StatusBadge';
-import { PriorityBadge } from '@/components/PriorityBadge';
-import { Timeline } from './Timeline';
-import { CommentComposer } from './CommentComposer';
-import { StaffActions } from './StaffActions';
 import { useAuth } from '@/auth/useAuth';
 import { isStaff } from '@/domain/user';
-import { formatAbsolute, formatRelative } from '@/lib/formatDate';
-import { formatError } from '@/lib/errorMessages';
 import { FormField, FormTextArea } from '@/components/FormField';
-import { Button, Card, CARD_CLASS, ErrorText, SectionHeading } from '@/components/ui';
+import { StatusBadge } from '@/components/StatusBadge';
+import { Icon } from '@/components/icons';
+import { Button, Card, ErrorText, SectionHeading } from '@/components/ui';
+import { formatError } from '@/lib/errorMessages';
 import { useApiMutation } from '@/hooks/useApiMutation';
-
-// Claude usually answers within a few seconds; give it a wide margin, then
-// give up rather than polling a ticket that is never going to be triaged.
-const TRIAGE_POLL_INTERVAL_MS = 3_000;
-const TRIAGE_POLL_WINDOW_MS = 2 * 60 * 1_000;
+import { AgentWorkspace } from './AgentWorkspace';
+import { CommentComposer } from './CommentComposer';
+import { Conversation } from './Conversation';
+import { useInvalidateTicket } from './useInvalidateTicket';
+import { useTicket } from './useTicket';
 
 export function TicketDetailPage() {
   const { id = '' } = useParams();
-  const navigate = useNavigate();
-  const invalidateTicket = useInvalidateTicket(id);
   const { user } = useAuth();
+  return isStaff(user?.role) ? <AgentWorkspace selectedId={id} /> : <SubmitterTicket id={id} />;
+}
 
-  const ticketQuery = useQuery({
-    queryKey: ticketKeys.detail(id),
-    queryFn: () => getTicket(id),
-    enabled: Boolean(id),
-    // Triage runs asynchronously after the backend commits the ticket, so a
-    // freshly created ticket arrives untriaged. Poll until it lands, then stop.
-    // Bounded by TRIAGE_POLL_WINDOW_MS so a ticket the RAG service never
-    // triaged (service down, unparseable reply) doesn't poll forever.
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data || data.triagedAt) {
-        return false;
-      }
-      const age = Date.now() - new Date(data.createdAt).getTime();
-      return age < TRIAGE_POLL_WINDOW_MS ? TRIAGE_POLL_INTERVAL_MS : false;
-    },
-  });
-  const historyQuery = useQuery({
-    queryKey: ticketKeys.history(id),
-    queryFn: () => getHistory(id),
-    enabled: Boolean(id),
-  });
+/**
+ * A submitter's view of their ticket: their wording for the status, the
+ * conversation without internal events, and no AI output — a draft nobody has
+ * checked yet is not something to show a customer.
+ */
+function SubmitterTicket({ id }: { id: string }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const invalidate = useInvalidateTicket(id);
+  const { ticket, history } = useTicket(id);
+  const [draft, setDraft] = useState('');
+  const [editing, setEditing] = useState(false);
 
-  if (ticketQuery.isPending) {
-    return <p className="text-slate-500">Loading ticket…</p>;
+  if (ticket.isPending) {
+    return <p className="mx-auto w-full max-w-2xl px-5 py-6 text-zinc-500">Loading ticket…</p>;
   }
-  if (ticketQuery.isError) {
+  if (ticket.isError) {
     return (
-      <div>
-        <ErrorText className="text-base">{formatError(ticketQuery.error)}</ErrorText>
-        <Link to="/tickets" className="mt-4 inline-block text-indigo-600 hover:underline">
-          ← Back to tickets
+      <div className="mx-auto w-full max-w-2xl px-5 py-6">
+        <ErrorText className="text-base">{formatError(ticket.error)}</ErrorText>
+        <Link to="/tickets" className="mt-4 inline-block text-brand-600 hover:underline">
+          ← My tickets
         </Link>
       </div>
     );
   }
 
-  const ticket = ticketQuery.data;
-  const staff = isStaff(user?.role);
-  const isSubmitter = user?.id === ticket.submitter?.id;
-  const canEditBody = isSubmitter && ticket.status === 'OPEN';
-  const canCloseAsSubmitter = isSubmitter && ticket.status === 'OPEN';
-  const triagePending =
-    !ticket.triagedAt && Date.now() - new Date(ticket.createdAt).getTime() < TRIAGE_POLL_WINDOW_MS;
+  const t = ticket.data;
+  const isOwner = user?.id === t.submitter?.id;
+  const open = isOwner && t.status === 'OPEN';
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-6">
-      <div className="min-w-0">
-        <Link to="/tickets" className="text-sm text-indigo-600 hover:underline">
-          ← All tickets
-        </Link>
-        <TicketHeader ticket={ticket} />
-        <TicketBody ticket={ticket} canEdit={canEditBody} onSaved={invalidateTicket} />
-
-        {ticket.suggestedResolution ? (
-          <div className="mt-6 rounded-md border border-indigo-200 bg-indigo-50 p-4">
-            <h2 className="text-sm font-semibold text-indigo-900">Suggested resolution</h2>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-indigo-900/80">
-              {ticket.suggestedResolution}
-            </p>
-          </div>
-        ) : triagePending ? (
-          <p className="mt-6 text-sm text-slate-500">Analysing this ticket…</p>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-5 py-5">
+      <Link to="/tickets" className="inline-flex items-center gap-1 text-[13px] text-brand-600">
+        <Icon name="back" size={14} />
+        My tickets
+      </Link>
+      <div>
+        <StatusBadge
+          status={t.status}
+          audience="submitter"
+          className={`text-[13px] font-semibold ${t.status === 'WAITING' ? 'text-orange-800' : 'text-zinc-700'}`}
+        />
+        <h1 className="mt-1 text-2xl font-bold break-words">{t.title}</h1>
+        {t.status === 'WAITING' ? (
+          <p className="mt-2 rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 text-[13px] text-orange-900">
+            We need a reply from you to keep going.
+          </p>
         ) : null}
-
-        <section className="mt-8">
-          <SectionHeading className="mb-3">Activity</SectionHeading>
-          {historyQuery.isPending ? (
-            <p className="text-slate-500 text-sm">Loading activity…</p>
-          ) : historyQuery.isError ? (
-            <ErrorText>{formatError(historyQuery.error)}</ErrorText>
-          ) : (
-            <Timeline entries={historyQuery.data} />
-          )}
-          <CommentComposer ticketId={ticket.id} />
-        </section>
       </div>
 
-      <aside className="flex flex-col gap-4">
-        {staff ? <StaffActions ticket={ticket} /> : null}
-        {canCloseAsSubmitter ? (
-          <SubmitterClose
-            ticket={ticket}
-            onClosed={() => {
-              invalidateTicket();
-              navigate('/tickets');
-            }}
-          />
-        ) : null}
-        <TicketMeta ticket={ticket} />
-      </aside>
+      {editing ? (
+        <EditTicket ticket={t} onDone={() => setEditing(false)} onSaved={invalidate} />
+      ) : history.isError ? (
+        <ErrorText>{formatError(history.error)}</ErrorText>
+      ) : (
+        <Conversation
+          ticket={t}
+          entries={history.data ?? []}
+          audience="submitter"
+          viewerId={user?.id}
+        />
+      )}
+
+      {open && !editing ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="self-start text-[13px] text-brand-600 hover:underline"
+        >
+          Edit ticket
+        </button>
+      ) : null}
+
+      {t.status !== 'CLOSED' ? (
+        <CommentComposer ticketId={t.id} label="Reply" value={draft} onChange={setDraft} />
+      ) : null}
+
+      {open ? (
+        <SubmitterClose
+          ticket={t}
+          onClosed={() => {
+            invalidate();
+            navigate('/tickets');
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function TicketHeader({ ticket }: { ticket: TicketDetail }) {
-  return (
-    <div className="mt-2">
-      <h1 className="text-2xl font-semibold text-slate-900 break-words">{ticket.title}</h1>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-        <StatusBadge status={ticket.status} />
-        <PriorityBadge priority={ticket.priority} />
-        {ticket.category ? <span className="text-slate-500">{ticket.category}</span> : null}
-        <span className="text-slate-500" title={formatAbsolute(ticket.createdAt)}>
-          Opened {formatRelative(ticket.createdAt)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function TicketBody({
+function EditTicket({
   ticket,
-  canEdit,
+  onDone,
   onSaved,
 }: {
   ticket: TicketDetail;
-  canEdit: boolean;
+  onDone: () => void;
   onSaved: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
   const [blankError, setBlankError] = useState<string | null>(null);
-
   const { mutation, errorMessage } = useApiMutation({
     mutationFn: () =>
       updateTicket(ticket.id, { title: title.trim(), description: description.trim() }),
     onSuccess: () => {
-      setEditing(false);
       onSaved();
+      onDone();
     },
   });
 
-  if (!editing) {
-    return (
-      <div className="mt-6">
-        <Card className="whitespace-pre-wrap text-slate-800">{ticket.description}</Card>
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={() => {
-              setTitle(ticket.title);
-              setDescription(ticket.description);
-              setBlankError(null);
-              setEditing(true);
-            }}
-            className="mt-2 text-sm text-indigo-600 hover:underline"
-          >
-            Edit ticket
-          </button>
-        ) : null}
-      </div>
-    );
-  }
-
   return (
     <form
-      className={`mt-6 ${CARD_CLASS} flex flex-col gap-3`}
+      className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4"
       onSubmit={(event) => {
         event.preventDefault();
         setBlankError(null);
@@ -217,13 +165,14 @@ function TicketBody({
         rows={6}
         value={description}
         onChange={(event) => setDescription(event.target.value)}
+        maxLength={TICKET_BODY_MAX}
       />
       {(blankError ?? errorMessage) ? <ErrorText>{blankError ?? errorMessage}</ErrorText> : null}
       <div className="flex gap-2">
-        <Button type="submit" disabled={mutation.isPending} className="text-sm">
+        <Button type="submit" disabled={mutation.isPending}>
           {mutation.isPending ? 'Saving…' : 'Save changes'}
         </Button>
-        <Button variant="secondary" className="text-sm" onClick={() => setEditing(false)}>
+        <Button variant="secondary" onClick={onDone}>
           Cancel
         </Button>
       </div>
@@ -239,8 +188,8 @@ function SubmitterClose({ ticket, onClosed }: { ticket: TicketDetail; onClosed: 
   return (
     <Card>
       <SectionHeading>Close this ticket</SectionHeading>
-      <p className="mt-1 text-xs text-slate-500">
-        If your issue is resolved, you can close the ticket. It cannot be reopened afterwards.
+      <p className="mt-1 text-[13px] text-zinc-600">
+        If your issue is sorted, you can close the ticket. It cannot be reopened afterwards.
       </p>
       <Button
         variant="secondary"
@@ -252,35 +201,6 @@ function SubmitterClose({ ticket, onClosed }: { ticket: TicketDetail; onClosed: 
         {mutation.isPending ? 'Closing…' : 'Close ticket'}
       </Button>
       {errorMessage ? <ErrorText className="mt-2">{errorMessage}</ErrorText> : null}
-    </Card>
-  );
-}
-
-function TicketMeta({ ticket }: { ticket: TicketDetail }) {
-  const rows = useMemo(
-    () => [
-      { label: 'Submitter', value: ticket.submitter?.displayName ?? '-' },
-      { label: 'Assignee', value: ticket.assignee?.displayName ?? 'Unassigned' },
-      { label: 'Created', value: formatAbsolute(ticket.createdAt) },
-      { label: 'Updated', value: formatAbsolute(ticket.updatedAt) },
-      ...(ticket.triagedAt ? [{ label: 'Triaged', value: formatAbsolute(ticket.triagedAt) }] : []),
-      ...(ticket.resolvedAt
-        ? [{ label: 'Resolved', value: formatAbsolute(ticket.resolvedAt) }]
-        : []),
-    ],
-    [ticket],
-  );
-  return (
-    <Card>
-      <SectionHeading className="mb-2">Details</SectionHeading>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        {rows.map((row) => (
-          <div key={row.label} className="contents">
-            <dt className="text-slate-500">{row.label}</dt>
-            <dd className="text-slate-800">{row.value}</dd>
-          </div>
-        ))}
-      </dl>
     </Card>
   );
 }

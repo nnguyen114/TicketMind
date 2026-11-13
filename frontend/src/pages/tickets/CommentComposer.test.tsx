@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,12 +18,18 @@ function anonymousRefresh() {
   );
 }
 
+// The composer is controlled; this is the smallest parent that owns the draft.
+function Composer() {
+  const [value, setValue] = useState('');
+  return <CommentComposer ticketId={TICKET_ID} label="Reply" value={value} onChange={setValue} />;
+}
+
 describe('CommentComposer', () => {
   it('rejects empty comments client-side without hitting the network', async () => {
     anonymousRefresh();
-    renderWithProviders(<CommentComposer ticketId={TICKET_ID} />);
-    await userEvent.click(await screen.findByRole('button', { name: /post comment/i }));
-    expect(screen.getByRole('alert')).toHaveTextContent(/comment cannot be empty/i);
+    renderWithProviders(<Composer />);
+    await userEvent.click(await screen.findByRole('button', { name: /send reply/i }));
+    expect(screen.getByRole('alert')).toHaveTextContent(/write a reply/i);
   });
 
   it('posts a trimmed body and clears the textarea on success', async () => {
@@ -42,10 +49,10 @@ describe('CommentComposer', () => {
       }),
     );
 
-    renderWithProviders(<CommentComposer ticketId={TICKET_ID} />);
-    const textarea = await screen.findByLabelText(/add a comment/i);
+    renderWithProviders(<Composer />);
+    const textarea = await screen.findByLabelText(/^reply$/i);
     await userEvent.type(textarea, '   Looking at logs   ');
-    await userEvent.click(screen.getByRole('button', { name: /post comment/i }));
+    await userEvent.click(screen.getByRole('button', { name: /send reply/i }));
 
     await waitFor(() => expect(received).toBe('Looking at logs'));
     expect(textarea).toHaveValue('');
@@ -59,9 +66,9 @@ describe('CommentComposer', () => {
       ),
     );
 
-    renderWithProviders(<CommentComposer ticketId={TICKET_ID} />);
-    await userEvent.type(await screen.findByLabelText(/add a comment/i), 'Something');
-    await userEvent.click(screen.getByRole('button', { name: /post comment/i }));
+    renderWithProviders(<Composer />);
+    await userEvent.type(await screen.findByLabelText(/^reply$/i), 'Something');
+    await userEvent.click(screen.getByRole('button', { name: /send reply/i }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/not allowed/i));
   });

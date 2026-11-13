@@ -1,222 +1,78 @@
-import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  listTickets,
-  TICKET_SORTS,
-  TICKET_STATUSES,
-  ticketKeys,
-  type TicketSort,
-  type TicketStatus,
-} from '@/api/tickets';
-import { StatusBadge } from '@/components/StatusBadge';
-import { STATUS_LABELS } from '@/domain/ticket';
-import { PriorityBadge } from '@/components/PriorityBadge';
+import { listTickets, ticketKeys, type PagedTickets } from '@/api/tickets';
+import { useAuth } from '@/auth/useAuth';
+import { isStaff } from '@/domain/user';
+import { SUBMITTER_STATUS_LABELS, type TicketStatus } from '@/domain/ticket';
+import { Icon, type IconName } from '@/components/icons';
+import { Button, ErrorText, LINK_BUTTON_CLASS, PageHeading } from '@/components/ui';
 import { formatRelative } from '@/lib/formatDate';
 import { formatError } from '@/lib/errorMessages';
-import { isStaff } from '@/domain/user';
-import { useAuth } from '@/auth/useAuth';
-import { Button, CARD_CLASS, LINK_BUTTON_CLASS, PageHeading } from '@/components/ui';
-
-const SORT_LABELS: Record<TicketSort, string> = {
-  NEWEST: 'Newest first',
-  OLDEST: 'Oldest first',
-  RECENTLY_UPDATED: 'Recently updated',
-  PRIORITY_HIGH_FIRST: 'Most urgent first',
-  PRIORITY_LOW_FIRST: 'Least urgent first',
-};
-
-const PAGE_SIZE = 20;
+import { AgentWorkspace } from './AgentWorkspace';
 
 export function TicketListPage() {
   const { user } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
+  return isStaff(user?.role) ? <AgentWorkspace /> : <MyTickets />;
+}
 
-  const status = (searchParams.get('status') as TicketStatus | null) ?? undefined;
-  const sortParam = searchParams.get('sort') as TicketSort | null;
-  const sort: TicketSort = sortParam && TICKET_SORTS.includes(sortParam) ? sortParam : 'NEWEST';
-  const page = Math.max(0, Number(searchParams.get('page') ?? '0'));
+const PAGE_SIZE = 20;
 
+/** A submitter's own tickets, as cards sized for a phone. */
+function MyTickets() {
+  const [params, setParams] = useSearchParams();
+  const page = Math.max(0, Number(params.get('page') ?? '0') || 0);
   const query = useQuery({
-    queryKey: ticketKeys.list({ status: status ?? null, sort, page }),
-    queryFn: () => listTickets({ status, sort, page, size: PAGE_SIZE }),
+    queryKey: ticketKeys.list({ view: 'ALL', sort: 'RECENTLY_UPDATED', page }),
+    queryFn: () => listTickets({ sort: 'RECENTLY_UPDATED', page, size: PAGE_SIZE }),
   });
-
   const totalPages = query.data?.totalPages ?? 0;
-  const hasPrev = page > 0;
-  const hasNext = page + 1 < totalPages;
-
-  const setSort = (next: TicketSort) => {
-    const params = new URLSearchParams(searchParams);
-    // NEWEST is the default, so keep it out of the URL rather than pinning a
-    // value that means "no preference".
-    if (next === 'NEWEST') params.delete('sort');
-    else params.set('sort', next);
-    params.delete('page');
-    setSearchParams(params);
-  };
-
-  const setStatus = (next: TicketStatus | undefined) => {
-    const params = new URLSearchParams(searchParams);
-    if (next) params.set('status', next);
-    else params.delete('status');
-    params.delete('page');
-    setSearchParams(params);
-  };
-
-  const setPage = (next: number) => {
-    const params = new URLSearchParams(searchParams);
-    params.set('page', String(next));
-    setSearchParams(params);
-  };
-
-  const emptyLabel = useMemo(() => {
-    if (isStaff(user?.role)) {
-      return status ? `No ${status.toLowerCase()} tickets in the queue.` : 'No tickets yet.';
-    }
-    return "You haven't opened any tickets yet.";
-  }, [status, user?.role]);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <PageHeading>Tickets</PageHeading>
-          <p className="text-sm text-slate-500">
-            {isStaff(user?.role)
-              ? 'Everyone’s tickets across the workspace.'
-              : 'Tickets you have opened.'}
-          </p>
-        </div>
-        <Link to="/tickets/new" className={`${LINK_BUTTON_CLASS} text-sm`}>
+    <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-5 py-5">
+      <div className="flex items-center justify-between gap-3">
+        <PageHeading>My tickets</PageHeading>
+        <Link to="/tickets/new" className={LINK_BUTTON_CLASS}>
+          <Icon name="plus" />
           New ticket
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
-          <button
-            type="button"
-            onClick={() => setStatus(undefined)}
-            className={`text-sm rounded-full px-3 py-1 border ${
-              !status
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'border-slate-300 text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            All
-          </button>
-          {TICKET_STATUSES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatus(s)}
-              className={`text-sm rounded-full px-3 py-1 border ${
-                status === s
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'border-slate-300 text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {STATUS_LABELS[s]}
-            </button>
-          ))}
-        </div>
-
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          Sort
-          <select
-            value={sort}
-            onChange={(event) => setSort(event.target.value as TicketSort)}
-            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
-          >
-            {Object.entries(SORT_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       {query.isPending ? (
-        <p className="text-slate-500">Loading tickets…</p>
+        <p className="text-zinc-500">Loading tickets…</p>
       ) : query.isError ? (
-        <p role="alert" className="text-red-600">
-          {formatError(query.error)}
-        </p>
+        <ErrorText>{formatError(query.error)}</ErrorText>
       ) : query.data.content.length === 0 ? (
-        <div className="rounded-md border border-dashed border-slate-300 p-8 text-center text-slate-500">
-          {emptyLabel}
+        <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center text-zinc-600">
+          <p className="font-semibold text-zinc-900">You haven’t opened any tickets yet.</p>
+          <p className="mt-1 text-[13px]">When something goes wrong, open one and we’ll help.</p>
         </div>
       ) : (
-        <div className={`${CARD_CLASS} p-0 overflow-hidden`}>
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-2 font-medium">Title</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Priority</th>
-                <th className="px-4 py-2 font-medium">Submitter</th>
-                <th className="px-4 py-2 font-medium">Assignee</th>
-                <th className="px-4 py-2 font-medium">Updated</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {query.data.content.map((ticket) => (
-                <tr key={ticket.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <Link
-                      to={`/tickets/${ticket.id}`}
-                      className="text-indigo-600 hover:underline font-medium"
-                    >
-                      {ticket.title}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={ticket.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <PriorityBadge priority={ticket.priority} />
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {ticket.submitter?.displayName ?? '-'}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {ticket.assignee?.displayName ?? (
-                      <span className="text-slate-400 italic">Unassigned</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-slate-500" title={ticket.updatedAt}>
-                    {formatRelative(ticket.updatedAt)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul className="flex flex-col gap-3">
+          {query.data.content.map((ticket) => (
+            <TicketCard key={ticket.id} ticket={ticket} />
+          ))}
+        </ul>
       )}
 
-      {query.data && query.data.totalElements > 0 ? (
-        <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
-          <p>
-            Page {page + 1} of {Math.max(1, totalPages)} · {query.data.totalElements} total
-          </p>
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-between text-[13px] text-zinc-600">
+          <span>
+            Page {page + 1} of {totalPages}
+          </span>
           <div className="flex gap-2">
             <Button
               variant="secondary"
               size="sm"
-              disabled={!hasPrev}
-              onClick={() => setPage(page - 1)}
-              className="disabled:hover:bg-transparent"
+              disabled={page === 0}
+              onClick={() => setParams({ page: String(page - 1) })}
             >
               Previous
             </Button>
             <Button
               variant="secondary"
               size="sm"
-              disabled={!hasNext}
-              onClick={() => setPage(page + 1)}
-              className="disabled:hover:bg-transparent"
+              disabled={page + 1 >= totalPages}
+              onClick={() => setParams({ page: String(page + 1) })}
             >
               Next
             </Button>
@@ -224,5 +80,46 @@ export function TicketListPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+const CARD_STATUS: Record<TicketStatus, { icon: IconName; className: string }> = {
+  OPEN: { icon: 'inbox', className: 'text-zinc-700' },
+  IN_PROGRESS: { icon: 'clock', className: 'text-brand-800' },
+  WAITING: { icon: 'message', className: 'font-bold text-orange-800' },
+  RESOLVED: { icon: 'checkCircle', className: 'text-green-800' },
+  CLOSED: { icon: 'lock', className: 'text-zinc-600' },
+};
+
+function TicketCard({ ticket }: { ticket: PagedTickets['content'][number] }) {
+  const waiting = ticket.status === 'WAITING';
+  const status = CARD_STATUS[ticket.status];
+  return (
+    <li>
+      <Link
+        to={`/tickets/${ticket.id}`}
+        className={`block rounded-xl p-4 text-zinc-900 hover:no-underline ${
+          waiting
+            ? 'border-[1.5px] border-orange-600 bg-orange-50'
+            : 'border border-zinc-200 bg-white hover:border-zinc-300'
+        }`}
+      >
+        <div className="mb-2 flex items-center gap-2">
+          <span
+            className={`inline-flex items-center gap-1.5 text-[13px] font-semibold ${status.className}`}
+          >
+            <Icon name={status.icon} />
+            {SUBMITTER_STATUS_LABELS[ticket.status]}
+          </span>
+          {waiting ? (
+            <span className="ml-auto rounded-full bg-orange-700 px-2 py-0.5 text-xs font-bold text-white">
+              Reply needed
+            </span>
+          ) : null}
+        </div>
+        <p className="mb-1 text-base font-semibold">{ticket.title}</p>
+        <p className="text-[13px] text-zinc-600">Updated {formatRelative(ticket.updatedAt)}</p>
+      </Link>
+    </li>
   );
 }

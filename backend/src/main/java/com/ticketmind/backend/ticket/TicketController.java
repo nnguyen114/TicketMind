@@ -54,12 +54,13 @@ public class TicketController {
 	@GetMapping
 	public PagedResponse<TicketSummaryResponse> list(
 			@AuthenticationPrincipal JwtPrincipal principal,
+			@RequestParam(defaultValue = "ALL") TicketView view,
 			@RequestParam(required = false) TicketStatus status,
 			@RequestParam(defaultValue = "NEWEST") TicketSort sort,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "20") int size) {
 		return PagedResponse.of(
-				ticketService.list(principal, status, sort, page, size),
+				ticketService.list(principal, view, status, sort, page, size),
 				TicketSummaryResponse::from);
 	}
 

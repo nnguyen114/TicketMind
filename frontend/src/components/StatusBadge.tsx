@@ -1,19 +1,22 @@
-import { STATUS_LABELS, type TicketStatus } from '@/domain/ticket';
+import { STATUS_LABELS, SUBMITTER_STATUS_LABELS, type TicketStatus } from '@/domain/ticket';
+import { Icon } from './icons';
+import { STATUS_ICONS } from './statusIcons';
 
-const styles: Record<TicketStatus, string> = {
-  OPEN: 'bg-blue-100 text-blue-800',
-  IN_PROGRESS: 'bg-amber-100 text-amber-800',
-  WAITING: 'bg-slate-200 text-slate-700',
-  RESOLVED: 'bg-emerald-100 text-emerald-800',
-  CLOSED: 'bg-slate-300 text-slate-700',
-};
-
-export function StatusBadge({ status }: { status: TicketStatus }) {
+/** Icon plus words: status is never shown by color alone. */
+export function StatusBadge({
+  status,
+  audience = 'staff',
+  className = '',
+}: {
+  status: TicketStatus;
+  audience?: 'staff' | 'submitter';
+  className?: string;
+}) {
+  const label = audience === 'staff' ? STATUS_LABELS[status] : SUBMITTER_STATUS_LABELS[status];
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status]}`}
-    >
-      {STATUS_LABELS[status]}
+    <span className={`inline-flex items-center gap-1 ${className}`}>
+      <Icon name={STATUS_ICONS[status]} size={14} />
+      {label}
     </span>
   );
 }

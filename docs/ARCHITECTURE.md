@@ -162,6 +162,13 @@ These are non-obvious choices that future code must keep consistent.
 - **Staff only, and a non-staff caller gets 404, not 403**. Matching `TicketService.assign`, so ticket ids stay unguessable.
 - It **overwrites** an existing result and **appends a second TRIAGED row** with `retriggered: true` rather than editing the first. The audit trail should show that a human asked for another opinion. `TicketTriageGateway.apply` takes a `force` flag for this; the automatic path stays first-write-wins so two racing listeners cannot produce two rows.
 
+**Queue views and account admin:**
+
+- `GET /tickets?view=` takes `ALL|MINE|UNASSIGNED|URGENT|WAITING|UNTRIAGED` (`ticket.TicketView`). Every view but ALL leaves out RESOLVED and CLOSED; a submitter's list ignores the view. The search query has an explicit `countQuery`: derived from the fetch-join version it reported the wrong total once the assignee filter joined on an alias.
+- `TicketSummaryResponse` carries `triagedAt` so queue rows can show Triaged / Analyzing / Not triaged without a per-row fetch.
+- Admin-only: `GET /users/all` (with a `locked` flag, via `AdminUserResponse`; `UserResponse` stays the staff-facing view without lockout state), `PATCH /users/{id}/active`, `POST /users/{id}/unlock`. Deactivating yourself is refused (403), and both deactivation and demotion refuse to remove the last **active** admin (`last_admin`): a deactivated admin cannot sign in, and the bootstrap only fires when no admin row exists at all.
+- The triage card's "Based on N similar resolved tickets" reads the citation ids stored in the latest TRIAGED history row and looks each up as a ticket; ids that are not tickets (seeded knowledge-base articles) are skipped. Titles and match scores are not stored with the triage.
+
 **Error envelope:**
 
 - Every error the API can return lives in one enum, `common.exception.ErrorCode` (status + stable machine code), and is thrown as `ApiException`. It replaced thirteen near-identical exception classes whose only content was those two values. `GlobalExceptionHandler` translates them to `ApiError { status, code, fieldErrors? }`. Exception messages are **never** returned to the client. Only the code.
@@ -208,6 +215,11 @@ These are non-obvious choices that future code must keep consistent.
 - Shared visual primitives live in `components/ui.tsx` (`Button`, `Card`, `ErrorText`, `PageHeading`, `SectionHeading`, `Muted`) and `components/FormField.tsx` (`FormField`, `FormTextArea`, `FormSelect`). Before them the same outline button existed in six files with the tokens in a different order in two, and `role="alert"` was hand-written on ten error paragraphs. Add a variant rather than a new class string.
 - `hooks/useApiMutation` owns the "error message" state every mutating component was declaring itself, and clears it on each attempt.
 - `pages/tickets/useInvalidateTicket` is the single answer to "what goes stale when a ticket changes". Query keys come from `ticketKeys` in `api/tickets.ts`; because keys match by prefix, invalidating `detail(id)` also covers `history(id)`.
+
+- **The UI follows the "TicketMind UI" design canvas.** Staff get a split workspace (`AgentWorkspace`): queue on the left with saved views, the open ticket on the right, `j`/`k`/`a`/`s`/`r` shortcuts. Submitters get phone-first cards and their own status wording (`SUBMITTER_STATUS_LABELS`). Brand blue is for actions; violet is reserved for AI output so it always reads as a suggestion.
+- **Submitters never see AI output.** The triage card, the TRIAGED/ASSIGNED/UPDATED history lines and `suggestedResolution` are staff-only in the UI: a draft nobody has checked is not something to show a customer. The backend still returns `suggestedResolution` to the submitter, so this is presentation, not access control.
+- **Session expiry is a dialog, not a redirect.** When a background refresh fails under a signed-in user, `AuthContext` moves to `expired` (not `anonymous`), `ProtectedRoute` keeps rendering, and `AppShell` asks for the password over the page, so an unsent reply survives. An explicit logout is flagged so it does not read as expiry.
+- The agent workspace is fixed to the viewport height on desktop (`lg:flex-none` — `flex-1` would otherwise override the height), and the ticket pane is `relative` so the AI card's absolutely positioned screen-reader live region stays inside its scroll box instead of stretching the page.
 
 - Access token lives in module memory only (`src/api/tokenStore.ts`), never in localStorage/sessionStorage. XSS should not be able to harvest a persistent credential. Refresh survives page reload because the backend's HttpOnly `tm_refresh` cookie is still valid; the app performs a silent `/auth/refresh` on mount (`AuthProvider`).
 - `apiFetch` (`src/api/client.ts`) attaches `Authorization: Bearer …` when a token exists, transparently refreshes-and-retries **once** on 401, and clears the token when refresh itself fails. Concurrent refreshes are serialised into a single in-flight promise. Many stale requests firing at once would otherwise walk into the backend's family-revocation trap.

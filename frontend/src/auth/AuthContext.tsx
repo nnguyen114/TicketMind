@@ -16,6 +16,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
   const bootstrappedRef = useRef(false);
+  // An explicit logout also clears the token; that must not read as expiry.
+  const loggingOutRef = useRef(false);
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
@@ -39,9 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     return tokenStore.subscribe((token) => {
-      if (token === null) {
-        setUser((current) => (current ? null : current));
-        setStatus((current) => (current === 'authenticated' ? 'anonymous' : current));
+      if (token === null && !loggingOutRef.current) {
+        setStatus((current) => (current === 'authenticated' ? 'expired' : current));
       }
     });
   }, []);
@@ -61,9 +62,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await logoutApi();
-    setUser(null);
-    setStatus('anonymous');
+    loggingOutRef.current = true;
+    try {
+      await logoutApi();
+    } finally {
+      loggingOutRef.current = false;
+      setUser(null);
+      setStatus('anonymous');
+    }
   }, []);
 
   const value = useMemo<AuthContextValue>(

@@ -24,6 +24,7 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -174,6 +175,62 @@ class UserRoleManagementTest {
 	private String bearerFor(User user) {
 		return "Bearer " + jwtService
 				.issueAccessToken(user.getId(), user.getEmail(), user.getRole().name()).token();
+	}
+
+	@Test
+	void anAdminSeesEveryAccountWithItsLockState() throws Exception {
+		alice.registerFailedLogin(1, Duration.ofMinutes(15), java.time.Instant.now());
+		userRepository.saveAndFlush(alice);
+
+		mockMvc.perform(get("/users/all").header(HttpHeaders.AUTHORIZATION, bearerFor(admin)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(2))
+				.andExpect(jsonPath("$[?(@.email=='alice@example.com')].locked").value(true));
+
+		mockMvc.perform(post("/users/" + alice.getId() + "/unlock")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(admin)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.locked").value(false));
+	}
+
+	@Test
+	void onlyAdminsCanManageAccounts() throws Exception {
+		User agent = createUser("agent@example.com", "Agent", UserRole.AGENT);
+		mockMvc.perform(get("/users/all").header(HttpHeaders.AUTHORIZATION, bearerFor(agent)))
+				.andExpect(status().isForbidden());
+		mockMvc.perform(patch("/users/" + alice.getId() + "/active")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(agent))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"active\":false}"))
+				.andExpect(status().isForbidden());
+	}
+
+	@Test
+	void deactivationRefusesYourselfAndTheLastActiveAdmin() throws Exception {
+		mockMvc.perform(patch("/users/" + alice.getId() + "/active")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(admin))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"active\":false}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.active").value(false));
+
+		mockMvc.perform(patch("/users/" + admin.getId() + "/active")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(admin))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"active\":false}"))
+				.andExpect(status().isForbidden());
+
+		// A second admin who is deactivated does not count: demoting or
+		// deactivating the only active one would still lock everyone out.
+		User second = createUser("admin2@example.com", "Admin Two", UserRole.ADMIN);
+		second.changeActive(false);
+		userRepository.saveAndFlush(second);
+		mockMvc.perform(patch("/users/" + admin.getId() + "/active")
+						.header(HttpHeaders.AUTHORIZATION, bearerFor(second))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"active\":false}"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("last_admin"));
 	}
 
 	private User createUser(String email, String displayName, UserRole role) {

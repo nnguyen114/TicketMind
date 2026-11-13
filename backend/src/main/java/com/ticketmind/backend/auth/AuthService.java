@@ -1,12 +1,11 @@
 package com.ticketmind.backend.auth;
 
+import com.ticketmind.backend.common.exception.ErrorCode;
+import com.ticketmind.backend.common.exception.ApiException;
 import com.ticketmind.backend.auth.dto.LoginRequest;
 import com.ticketmind.backend.auth.dto.RegisterRequest;
 import com.ticketmind.backend.auth.dto.TokenResponse;
 import com.ticketmind.backend.auth.dto.UserResponse;
-import com.ticketmind.backend.common.exception.AccountLockedException;
-import com.ticketmind.backend.common.exception.EmailAlreadyExistsException;
-import com.ticketmind.backend.common.exception.InvalidCredentialsException;
 import com.ticketmind.backend.common.exception.InvalidRefreshTokenException;
 import com.ticketmind.backend.security.jwt.JwtService;
 import com.ticketmind.backend.user.User;
@@ -51,7 +50,7 @@ public class AuthService {
 		String email = request.email().toLowerCase().trim();
 		passwordPolicy.verify(request.password(), email);
 		if (userRepository.existsByEmailIgnoreCase(email)) {
-			throw new EmailAlreadyExistsException();
+			throw new ApiException(ErrorCode.EMAIL_ALREADY_REGISTERED);
 		}
 		String hash = passwordEncoder.encode(request.password());
 		User user = User.create(email, hash, request.displayName().trim());
@@ -68,14 +67,14 @@ public class AuthService {
 			// (mitigates user-enumeration by response-time side channel).
 			passwordEncoder.matches(request.password(),
 					"{bcrypt}$2a$12$invalidplaceholderhashvalueforuse..........................");
-			throw new InvalidCredentialsException();
+			throw new ApiException(ErrorCode.INVALID_CREDENTIALS);
 		}
 		if (user.isLocked(now)) {
-			throw new AccountLockedException();
+			throw new ApiException(ErrorCode.ACCOUNT_LOCKED);
 		}
 		if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
 			loginAttemptRecorder.recordFailedLogin(user.getId(), now);
-			throw new InvalidCredentialsException();
+			throw new ApiException(ErrorCode.INVALID_CREDENTIALS);
 		}
 		User refreshed = loginAttemptRecorder.markLoginSuccessful(user.getId(), now);
 		return issueSession(refreshed, userAgent, ipAddress);

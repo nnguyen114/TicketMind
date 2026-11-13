@@ -1,78 +1,58 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   assignTicket,
   changeTicketStatus,
   retriageTicket,
+  TICKET_STATUSES,
   type TicketDetail,
   type TicketStatus,
 } from '@/api/tickets';
 import { useAuth } from '@/auth/useAuth';
-import { formatError } from '@/lib/errorMessages';
-import { useState } from 'react';
-
-const STAFF_STATUSES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'WAITING', 'RESOLVED', 'CLOSED'];
+import { FormSelect } from '@/components/FormField';
+import { STATUS_LABELS } from '@/domain/ticket';
+import { Button, Card, ErrorText, Muted, SectionHeading } from '@/components/ui';
+import { useApiMutation } from '@/hooks/useApiMutation';
+import { useInvalidateTicket } from './useInvalidateTicket';
 
 export function StaffActions({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
-  const qc = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
+  const invalidateTicket = useInvalidateTicket(ticket.id);
 
-  const statusMutation = useMutation({
+  const status = useApiMutation<unknown, TicketStatus>({
     mutationFn: (next: TicketStatus) => changeTicketStatus(ticket.id, next),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['ticket', ticket.id] });
-      void qc.invalidateQueries({ queryKey: ['tickets'] });
-    },
-    onError: (err) => setError(formatError(err)),
+    onSuccess: invalidateTicket,
   });
-
-  const retriageMutation = useMutation({
+  const retriage = useApiMutation({
     mutationFn: () => retriageTicket(ticket.id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['ticket', ticket.id] });
-      void qc.invalidateQueries({ queryKey: ['ticket', ticket.id, 'history'] });
-      void qc.invalidateQueries({ queryKey: ['tickets'] });
-    },
-    onError: (err) => setError(formatError(err)),
+    onSuccess: invalidateTicket,
   });
-
-  const assignMutation = useMutation({
+  const assign = useApiMutation<unknown, string | null>({
     mutationFn: (assigneeId: string | null) => assignTicket(ticket.id, assigneeId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['ticket', ticket.id] });
-      void qc.invalidateQueries({ queryKey: ['tickets'] });
-    },
-    onError: (err) => setError(formatError(err)),
+    onSuccess: invalidateTicket,
   });
 
   const isAssignedToMe = user?.id === ticket.assignee?.id;
-  const canClose = ticket.status !== 'CLOSED';
+  const isClosed = ticket.status === 'CLOSED';
+  const error = status.errorMessage ?? assign.errorMessage ?? retriage.errorMessage;
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-4 flex flex-col gap-3">
-      <h2 className="text-sm font-semibold text-slate-900">Staff actions</h2>
+    <Card className="flex flex-col gap-3">
+      <SectionHeading>Staff actions</SectionHeading>
 
       <div>
-        <label htmlFor="status-select" className="text-xs font-medium text-slate-600">
-          Status
-        </label>
-        <select
+        <FormSelect
+          label="Status"
           id="status-select"
           value={ticket.status}
-          disabled={statusMutation.isPending || !canClose}
-          onChange={(event) => {
-            setError(null);
-            statusMutation.mutate(event.target.value as TicketStatus);
-          }}
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
+          disabled={status.mutation.isPending || isClosed}
+          onChange={(event) => status.mutation.mutate(event.target.value as TicketStatus)}
         >
-          {STAFF_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s.replace('_', ' ').toLowerCase()}
+          {TICKET_STATUSES.map((value) => (
+            <option key={value} value={value}>
+              {STATUS_LABELS[value]}
             </option>
           ))}
-        </select>
-        {ticket.status === 'CLOSED' ? (
+        </FormSelect>
+        {isClosed ? (
           <p className="mt-1 text-xs text-slate-500">Closed tickets cannot be reopened.</p>
         ) : null}
       </div>
@@ -85,35 +65,29 @@ export function StaffActions({ ticket }: { ticket: TicketDetail }) {
               Assigned to <span className="font-medium">{ticket.assignee.displayName}</span>
             </>
           ) : (
-            <span className="text-slate-500 italic">Unassigned</span>
+            <Muted>Unassigned</Muted>
           )}
         </p>
         <div className="mt-2 flex gap-2 flex-wrap">
           {!isAssignedToMe && user ? (
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                assignMutation.mutate(user.id);
-              }}
-              disabled={assignMutation.isPending}
-              className="rounded-md border border-indigo-600 text-indigo-600 px-3 py-1.5 text-sm hover:bg-indigo-50 disabled:opacity-60"
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => assign.mutation.mutate(user.id)}
+              disabled={assign.mutation.isPending}
             >
               Take ticket
-            </button>
+            </Button>
           ) : null}
           {ticket.assignee ? (
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                assignMutation.mutate(null);
-              }}
-              disabled={assignMutation.isPending}
-              className="rounded-md border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-60"
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => assign.mutation.mutate(null)}
+              disabled={assign.mutation.isPending}
             >
               Unassign
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>
@@ -127,24 +101,22 @@ export function StaffActions({ ticket }: { ticket: TicketDetail }) {
               {ticket.priority?.toLowerCase() ?? 'no priority'}
             </>
           ) : (
-            <span className="text-slate-500 italic">Not triaged</span>
+            <Muted>Not triaged</Muted>
           )}
         </p>
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            retriageMutation.mutate();
-          }}
-          disabled={retriageMutation.isPending}
-          className="mt-2 rounded-md border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-60"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-2"
+          onClick={() => retriage.mutation.mutate()}
+          disabled={retriage.mutation.isPending}
         >
-          {retriageMutation.isPending
+          {retriage.mutation.isPending
             ? 'Analysing…'
             : ticket.triagedAt
               ? 'Re-run triage'
               : 'Run triage'}
-        </button>
+        </Button>
         {!ticket.triagedAt ? (
           <p className="mt-1 text-xs text-slate-500">
             Automatic triage can fail on a provider rate limit. Re-running is safe.
@@ -152,11 +124,7 @@ export function StaffActions({ ticket }: { ticket: TicketDetail }) {
         ) : null}
       </div>
 
-      {error ? (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      ) : null}
-    </div>
+      {error ? <ErrorText>{error}</ErrorText> : null}
+    </Card>
   );
 }

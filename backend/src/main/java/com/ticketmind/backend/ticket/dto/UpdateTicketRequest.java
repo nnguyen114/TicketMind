@@ -1,9 +1,10 @@
 package com.ticketmind.backend.ticket.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import com.ticketmind.backend.ticket.TicketLimits;
 import jakarta.validation.constraints.Size;
 
 public record UpdateTicketRequest(
-		@NotBlank @Size(max = 200) String title,
-		@NotBlank @Size(max = 20_000) String description) {
+		@NotBlank @Size(max = TicketLimits.TITLE_MAX) String title,
+		@NotBlank @Size(max = TicketLimits.BODY_MAX) String description) {
 }

@@ -1,13 +1,22 @@
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { listTickets, TICKET_SORTS, type TicketSort, type TicketStatus } from '@/api/tickets';
+import {
+  listTickets,
+  TICKET_SORTS,
+  TICKET_STATUSES,
+  ticketKeys,
+  type TicketSort,
+  type TicketStatus,
+} from '@/api/tickets';
 import { StatusBadge } from '@/components/StatusBadge';
+import { STATUS_LABELS } from '@/domain/ticket';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { formatRelative } from '@/lib/formatDate';
 import { formatError } from '@/lib/errorMessages';
-import { isStaff } from '@/lib/roles';
+import { isStaff } from '@/domain/user';
 import { useAuth } from '@/auth/useAuth';
+import { Button, CARD_CLASS, LINK_BUTTON_CLASS, PageHeading } from '@/components/ui';
 
 const SORT_LABELS: Record<TicketSort, string> = {
   NEWEST: 'Newest first',
@@ -18,7 +27,6 @@ const SORT_LABELS: Record<TicketSort, string> = {
 };
 
 const PAGE_SIZE = 20;
-const STATUSES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'WAITING', 'RESOLVED', 'CLOSED'];
 
 export function TicketListPage() {
   const { user } = useAuth();
@@ -30,7 +38,7 @@ export function TicketListPage() {
   const page = Math.max(0, Number(searchParams.get('page') ?? '0'));
 
   const query = useQuery({
-    queryKey: ['tickets', { status: status ?? null, sort, page }],
+    queryKey: ticketKeys.list({ status: status ?? null, sort, page }),
     queryFn: () => listTickets({ status, sort, page, size: PAGE_SIZE }),
   });
 
@@ -73,17 +81,14 @@ export function TicketListPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Tickets</h1>
+          <PageHeading>Tickets</PageHeading>
           <p className="text-sm text-slate-500">
             {isStaff(user?.role)
               ? 'Everyone’s tickets across the workspace.'
               : 'Tickets you have opened.'}
           </p>
         </div>
-        <Link
-          to="/tickets/new"
-          className="rounded-md bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-500"
-        >
+        <Link to="/tickets/new" className={`${LINK_BUTTON_CLASS} text-sm`}>
           New ticket
         </Link>
       </div>
@@ -101,7 +106,7 @@ export function TicketListPage() {
           >
             All
           </button>
-          {STATUSES.map((s) => (
+          {TICKET_STATUSES.map((s) => (
             <button
               key={s}
               type="button"
@@ -112,7 +117,7 @@ export function TicketListPage() {
                   : 'border-slate-300 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              {s.replace('_', ' ').toLowerCase()}
+              {STATUS_LABELS[s]}
             </button>
           ))}
         </div>
@@ -144,7 +149,7 @@ export function TicketListPage() {
           {emptyLabel}
         </div>
       ) : (
-        <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
+        <div className={`${CARD_CLASS} p-0 overflow-hidden`}>
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
@@ -197,22 +202,24 @@ export function TicketListPage() {
             Page {page + 1} of {Math.max(1, totalPages)} · {query.data.totalElements} total
           </p>
           <div className="flex gap-2">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={!hasPrev}
               onClick={() => setPage(page - 1)}
-              className="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-slate-100 disabled:hover:bg-transparent"
+              className="disabled:hover:bg-transparent"
             >
               Previous
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={!hasNext}
               onClick={() => setPage(page + 1)}
-              className="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-slate-100 disabled:hover:bg-transparent"
+              className="disabled:hover:bg-transparent"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}

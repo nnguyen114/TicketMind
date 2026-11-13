@@ -1,6 +1,7 @@
 package com.ticketmind.backend.auth;
 
-import com.ticketmind.backend.common.exception.PasswordPolicyException;
+import com.ticketmind.backend.common.exception.ApiException;
+import com.ticketmind.backend.common.exception.ErrorCode;
 import com.ticketmind.backend.security.AuthProperties;
 import org.junit.jupiter.api.Test;
 
@@ -22,30 +23,35 @@ class PasswordPolicyTest {
 
 	@Test
 	void rejectsTooShortPassword() {
-		assertThatThrownBy(() -> policy.verify("short1!", "u@example.com"))
-				.isInstanceOf(PasswordPolicyException.class)
-				.hasMessage("too_short");
+		assertRejects("short1!", "u@example.com", "too_short");
 	}
 
 	@Test
 	void rejectsExcessivelyLongPassword() {
-		String huge = "a".repeat(300);
-		assertThatThrownBy(() -> policy.verify(huge, "u@example.com"))
-				.isInstanceOf(PasswordPolicyException.class)
-				.hasMessage("too_long");
+		assertRejects("a".repeat(300), "u@example.com", "too_long");
 	}
 
 	@Test
 	void rejectsPasswordEqualToEmail() {
-		assertThatThrownBy(() -> policy.verify("alice@example.com", "ALICE@example.com"))
-				.isInstanceOf(PasswordPolicyException.class)
-				.hasMessage("contains_email");
+		assertRejects("alice@example.com", "ALICE@example.com", "contains_email");
 	}
 
 	@Test
 	void rejectsNullPassword() {
-		assertThatThrownBy(() -> policy.verify(null, "u@example.com"))
-				.isInstanceOf(PasswordPolicyException.class)
-				.hasMessage("missing");
+		assertRejects(null, "u@example.com", "missing");
+	}
+
+	/**
+	 * Every rejection answers the same wire code; the reason survives only as the
+	 * exception message, which is for logs. Asserting both keeps the distinction
+	 * visible - a client cannot tell these four cases apart, and that is
+	 * deliberate.
+	 */
+	private void assertRejects(String password, String email, String reason) {
+		assertThatThrownBy(() -> policy.verify(password, email))
+				.isInstanceOf(ApiException.class)
+				.hasMessage(reason)
+				.extracting(thrown -> ((ApiException) thrown).code())
+				.isEqualTo(ErrorCode.PASSWORD_POLICY.code());
 	}
 }

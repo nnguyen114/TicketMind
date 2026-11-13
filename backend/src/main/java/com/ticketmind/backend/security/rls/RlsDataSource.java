@@ -98,21 +98,14 @@ public class RlsDataSource extends DelegatingDataSource {
 		try (var statement = connection.createStatement()) {
 			statement.execute("SET ROLE " + appRole);
 		}
+		// Resolved once, deliberately. Two lookups could straddle a context
+		// change and stamp one identity's id alongside another's role.
+		JwtPrincipal principal = currentPrincipal();
 		try (PreparedStatement statement = connection.prepareStatement(APPLY_SQL)) {
-			statement.setString(1, currentUserId());
-			statement.setString(2, currentUserRole());
+			statement.setString(1, principal == null ? "" : principal.id().toString());
+			statement.setString(2, principal == null ? SYSTEM_ROLE : principal.role().name());
 			statement.execute();
 		}
-	}
-
-	private static String currentUserId() {
-		JwtPrincipal principal = currentPrincipal();
-		return principal == null ? "" : principal.id().toString();
-	}
-
-	private static String currentUserRole() {
-		JwtPrincipal principal = currentPrincipal();
-		return principal == null ? SYSTEM_ROLE : principal.role().name();
 	}
 
 	private static JwtPrincipal currentPrincipal() {

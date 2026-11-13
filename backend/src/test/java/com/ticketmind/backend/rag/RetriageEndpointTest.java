@@ -10,6 +10,8 @@ import com.ticketmind.backend.ticket.TicketHistoryEventType;
 import com.ticketmind.backend.ticket.TicketHistoryRepository;
 import com.ticketmind.backend.ticket.TicketPriority;
 import com.ticketmind.backend.ticket.TicketRepository;
+import com.ticketmind.backend.ticket.TicketTriageGateway;
+import com.ticketmind.backend.ticket.TriageOutcome;
 import com.ticketmind.backend.user.RefreshTokenRepository;
 import com.ticketmind.backend.user.User;
 import com.ticketmind.backend.user.UserRepository;
@@ -96,7 +98,7 @@ class RetriageEndpointTest {
 	@Autowired private UserRepository userRepository;
 	@Autowired private RefreshTokenRepository refreshTokenRepository;
 	@Autowired private JwtService jwtService;
-	@Autowired private TicketTriageWriter triageWriter;
+	@Autowired private TicketTriageGateway triageGateway;
 	@Autowired private MockRestServiceServer mockRagServer;
 
 	private final ObjectMapper objectMapper = new ObjectMapper();
@@ -139,7 +141,8 @@ class RetriageEndpointTest {
 	@Test
 	void retriageOverwritesAnEarlierResultAndAppendsASecondAuditRow() throws Exception {
 		// Seed a first result the way the automatic path would.
-		triageWriter.applyTriage(ticketId, payload("general", "LOW"));
+		triageGateway.apply(ticketId, new TriageOutcome(
+				"general", TicketPriority.LOW, "r", "s", List.of()), false);
 
 		MockRestServiceServer server = mockRagServer;
 		server.expect(requestTo(BASE_URL + "/triage")).andRespond(triageResponse("billing", "CRITICAL"));

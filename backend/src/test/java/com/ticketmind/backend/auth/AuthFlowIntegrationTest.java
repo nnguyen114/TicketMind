@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -36,6 +37,7 @@ class AuthFlowIntegrationTest {
 	@Autowired private UserRepository userRepository;
 	@Autowired private RefreshTokenRepository refreshTokenRepository;
 	@Autowired private RateLimiterService rateLimiterService;
+	@Autowired private JdbcTemplate jdbcTemplate;
 
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -217,6 +219,23 @@ class AuthFlowIntegrationTest {
 				.noneMatch(t -> t.getTokenHash().equals(rawRefresh));
 		assertThat(refreshTokenRepository.findAll())
 				.allMatch(t -> t.getTokenHash().length() > 30);
+	}
+
+	@Test
+	void refreshIsRefusedOnceTheAccountIsDeactivated() throws Exception {
+		String email = "ivy@example.com";
+		MvcResult registered = mockMvc.perform(post("/auth/register")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(body(email, "correct horse battery staple", "Ivy")))
+				.andExpect(status().isOk())
+				.andReturn();
+		Cookie refreshCookie = registered.getResponse().getCookie("tm_refresh");
+
+		jdbcTemplate.update("UPDATE users SET is_active = false WHERE email = ?", email);
+
+		mockMvc.perform(post("/auth/refresh").cookie(refreshCookie))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("invalid_refresh_token"));
 	}
 
 	private void assertRefreshCookieAttrs(MvcResult result) {

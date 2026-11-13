@@ -11,8 +11,8 @@ export const apiErrorSchema = z.object({
   fieldErrors: z.array(fieldErrorSchema).optional(),
 });
 
-export type FieldError = z.infer<typeof fieldErrorSchema>;
-export type ApiErrorBody = z.infer<typeof apiErrorSchema>;
+type FieldError = z.infer<typeof fieldErrorSchema>;
+type ApiErrorBody = z.infer<typeof apiErrorSchema>;
 
 export class ApiError extends Error {
   readonly status: number;

@@ -1,5 +1,6 @@
 package com.ticketmind.backend.security.jwt;
 
+import com.ticketmind.backend.common.web.RequestPaths;
 import com.ticketmind.backend.user.UserRole;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -41,10 +42,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
-		// See HttpsEnforcementFilter: getServletPath() depends on the container's
-		// servlet mapping and is empty under MockMvc.
-		return ANONYMOUS_PATHS.contains(
-				request.getRequestURI().substring(request.getContextPath().length()));
+		return ANONYMOUS_PATHS.contains(RequestPaths.of(request));
 	}
 
 	@Override

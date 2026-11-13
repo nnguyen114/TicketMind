@@ -1,20 +1,14 @@
 package com.ticketmind.backend.common.exception;
 
-import org.springframework.http.HttpStatus;
-
+/**
+ * Its own type purely so {@code RefreshTokenService.rotate} can name it in
+ * {@code @Transactional(noRollbackFor = ...)}. The family-wide revocation
+ * triggered by a re-used token is a bulk UPDATE that the rolling-back outer
+ * transaction would otherwise undo, silently disabling reuse detection.
+ */
 public final class InvalidRefreshTokenException extends ApiException {
 
 	public InvalidRefreshTokenException() {
-		super("invalid refresh token");
-	}
-
-	@Override
-	public HttpStatus status() {
-		return HttpStatus.UNAUTHORIZED;
-	}
-
-	@Override
-	public String code() {
-		return "invalid_refresh_token";
+		super(ErrorCode.INVALID_REFRESH_TOKEN);
 	}
 }

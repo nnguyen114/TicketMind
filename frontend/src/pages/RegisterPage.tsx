@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/useAuth';
 import { FormField } from '@/components/FormField';
+import { Button, ErrorText, PageHeading } from '@/components/ui';
 import { formatError } from '@/lib/errorMessages';
 
 const schema = z.object({
@@ -51,7 +52,7 @@ export function RegisterPage() {
 
   return (
     <div className="mx-auto max-w-md">
-      <h1 className="text-2xl font-semibold text-slate-900 mb-6">Create your account</h1>
+      <PageHeading>Create your account</PageHeading>
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
         <FormField
           label="Display name"
@@ -74,18 +75,10 @@ export function RegisterPage() {
           error={errors.password?.message}
           hint="At least 12 characters with a letter and a number."
         />
-        {serverError ? (
-          <p role="alert" className="text-sm text-red-600">
-            {serverError}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded-md bg-indigo-600 text-white px-4 py-2 font-medium hover:bg-indigo-500 disabled:opacity-60"
-        >
+        {serverError ? <ErrorText>{serverError}</ErrorText> : null}
+        <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? 'Creating account…' : 'Create account'}
-        </button>
+        </Button>
       </form>
       <p className="mt-6 text-sm text-slate-600">
         Already have an account?{' '}

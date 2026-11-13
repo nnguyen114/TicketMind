@@ -1,4 +1,4 @@
-import type { TicketStatus } from '@/api/tickets';
+import { STATUS_LABELS, type TicketStatus } from '@/domain/ticket';
 
 const styles: Record<TicketStatus, string> = {
   OPEN: 'bg-blue-100 text-blue-800',
@@ -8,20 +8,12 @@ const styles: Record<TicketStatus, string> = {
   CLOSED: 'bg-slate-300 text-slate-700',
 };
 
-const labels: Record<TicketStatus, string> = {
-  OPEN: 'Open',
-  IN_PROGRESS: 'In progress',
-  WAITING: 'Waiting',
-  RESOLVED: 'Resolved',
-  CLOSED: 'Closed',
-};
-
 export function StatusBadge({ status }: { status: TicketStatus }) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status]}`}
     >
-      {labels[status]}
+      {STATUS_LABELS[status]}
     </span>
   );
 }

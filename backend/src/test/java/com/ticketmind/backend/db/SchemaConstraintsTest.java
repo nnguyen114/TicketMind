@@ -31,7 +31,6 @@ class SchemaConstraintsTest {
 	@BeforeEach
 	void cleanData() {
 		// Order matters: ticket_history -> tickets -> refresh_tokens -> users
-		jdbc.update("DELETE FROM ticket_embeddings");
 		jdbc.update("DELETE FROM ticket_history");
 		jdbc.update("DELETE FROM tickets");
 		jdbc.update("DELETE FROM refresh_tokens");

@@ -1,10 +1,9 @@
 package com.ticketmind.backend.ticket;
 
+import com.ticketmind.backend.common.exception.ErrorCode;
+import com.ticketmind.backend.common.exception.ApiException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-import com.ticketmind.backend.common.exception.AgentRequiredException;
-import com.ticketmind.backend.common.exception.InvalidTicketStateException;
-import com.ticketmind.backend.common.exception.TicketNotFoundException;
 import com.ticketmind.backend.security.jwt.JwtPrincipal;
 import com.ticketmind.backend.ticket.dto.AddCommentRequest;
 import com.ticketmind.backend.ticket.dto.AssignTicketRequest;
@@ -23,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -71,8 +71,7 @@ public class TicketService {
 
 	@Transactional(readOnly = true)
 	public Ticket get(JwtPrincipal actor, UUID ticketId) {
-		Ticket ticket = ticketRepository.findWithUsersById(ticketId)
-				.orElseThrow(TicketNotFoundException::new);
+		Ticket ticket = requireTicket(ticketId);
 		assertCanRead(actor, ticket);
 		return ticket;
 	}
@@ -86,14 +85,13 @@ public class TicketService {
 		PageRequest pageRequest = PageRequest.of(safePage, safeSize, safeSort.sort());
 		// USER role only ever sees its own tickets, pin the submitter
 		// filter regardless of what the caller asked for.
-		UUID submitterFilter = isStaff(actor) ? null : actor.id();
+		UUID submitterFilter = actor.role().isStaff() ? null : actor.id();
 		return ticketRepository.search(status, submitterFilter, pageRequest);
 	}
 
 	@Transactional
 	public Ticket update(JwtPrincipal actor, UUID ticketId, UpdateTicketRequest request) {
-		Ticket ticket = ticketRepository.findWithUsersById(ticketId)
-				.orElseThrow(TicketNotFoundException::new);
+		Ticket ticket = requireTicket(ticketId);
 		assertCanEditContent(actor, ticket);
 		ticket.updateContent(request.title().trim(), request.description().trim());
 		User actorUser = userRepository.getReferenceById(actor.id());
@@ -104,14 +102,13 @@ public class TicketService {
 
 	@Transactional
 	public Ticket changeStatus(JwtPrincipal actor, UUID ticketId, ChangeStatusRequest request) {
-		Ticket ticket = ticketRepository.findWithUsersById(ticketId)
-				.orElseThrow(TicketNotFoundException::new);
+		Ticket ticket = requireTicket(ticketId);
 		assertCanChangeStatus(actor, ticket, request.status());
 		TicketStatus previous = ticket.getStatus();
 		try {
 			ticket.changeStatus(request.status(), clock.instant());
 		} catch (IllegalStateException ex) {
-			throw new InvalidTicketStateException(ex.getMessage());
+			throw new ApiException(ErrorCode.INVALID_TICKET_STATE, ex.getMessage());
 		}
 		User actorUser = userRepository.getReferenceById(actor.id());
 		TicketHistoryEventType eventType = switch (request.status()) {
@@ -134,17 +131,16 @@ public class TicketService {
 
 	@Transactional
 	public Ticket assign(JwtPrincipal actor, UUID ticketId, AssignTicketRequest request) {
-		if (!isStaff(actor)) {
-			throw new TicketNotFoundException();
+		if (!actor.role().isStaff()) {
+			throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
 		}
-		Ticket ticket = ticketRepository.findWithUsersById(ticketId)
-				.orElseThrow(TicketNotFoundException::new);
+		Ticket ticket = requireTicket(ticketId);
 		User assignee = null;
 		if (request.assigneeId() != null) {
 			assignee = userRepository.findById(request.assigneeId())
-					.orElseThrow(AgentRequiredException::new);
+					.orElseThrow(ErrorCode.AGENT_REQUIRED::exception);
 			if (assignee.getRole() == UserRole.USER || !assignee.isActive()) {
-				throw new AgentRequiredException();
+				throw new ApiException(ErrorCode.AGENT_REQUIRED);
 			}
 			ticket.assignTo(assignee);
 		} else {
@@ -159,8 +155,7 @@ public class TicketService {
 
 	@Transactional
 	public TicketHistory comment(JwtPrincipal actor, UUID ticketId, AddCommentRequest request) {
-		Ticket ticket = ticketRepository.findWithUsersById(ticketId)
-				.orElseThrow(TicketNotFoundException::new);
+		Ticket ticket = requireTicket(ticketId);
 		assertCanRead(actor, ticket);
 		User actorUser = userRepository.findById(actor.id()).orElseThrow();
 		return recordHistory(ticket, actorUser, TicketHistoryEventType.COMMENT, Map.of(
@@ -168,11 +163,15 @@ public class TicketService {
 	}
 
 	@Transactional(readOnly = true)
-	public java.util.List<TicketHistory> history(JwtPrincipal actor, UUID ticketId) {
-		Ticket ticket = ticketRepository.findWithUsersById(ticketId)
-				.orElseThrow(TicketNotFoundException::new);
+	public List<TicketHistory> history(JwtPrincipal actor, UUID ticketId) {
+		Ticket ticket = requireTicket(ticketId);
 		assertCanRead(actor, ticket);
 		return historyRepository.findByTicketIdOrderByCreatedAtAsc(ticketId);
+	}
+
+	private Ticket requireTicket(UUID ticketId) {
+		return ticketRepository.findWithUsersById(ticketId)
+				.orElseThrow(ErrorCode.TICKET_NOT_FOUND::exception);
 	}
 
 	private TicketHistory recordHistory(Ticket ticket, User actor, TicketHistoryEventType type, Map<String, ?> payload) {
@@ -189,42 +188,39 @@ public class TicketService {
 	}
 
 	private void assertCanRead(JwtPrincipal actor, Ticket ticket) {
-		if (isStaff(actor)) {
+		if (actor.role().isStaff()) {
 			return;
 		}
 		if (ticket.getSubmitter() == null || !ticket.getSubmitter().getId().equals(actor.id())) {
-			throw new TicketNotFoundException();
+			throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
 		}
 	}
 
 	private void assertCanEditContent(JwtPrincipal actor, Ticket ticket) {
 		assertCanRead(actor, ticket);
-		if (isStaff(actor)) {
+		if (actor.role().isStaff()) {
 			return;
 		}
 		// Submitters can only edit the body of the ticket while it is still
 		// OPEN. Afterwards an agent is working it and rewrites would
 		// invalidate context.
 		if (ticket.getStatus() != TicketStatus.OPEN) {
-			throw new InvalidTicketStateException(
+			throw new ApiException(ErrorCode.INVALID_TICKET_STATE, 
 					"ticket is " + ticket.getStatus() + ", body is no longer editable by submitter");
 		}
 	}
 
 	private void assertCanChangeStatus(JwtPrincipal actor, Ticket ticket, TicketStatus next) {
 		assertCanRead(actor, ticket);
-		if (isStaff(actor)) {
+		if (actor.role().isStaff()) {
 			return;
 		}
 		// Submitters are only allowed one self-driven status change: closing
 		// an OPEN ticket they no longer need help with.
 		boolean userSelfClose = ticket.getStatus() == TicketStatus.OPEN && next == TicketStatus.CLOSED;
 		if (!userSelfClose) {
-			throw new InvalidTicketStateException("only an agent can change this ticket's status");
+			throw new ApiException(ErrorCode.INVALID_TICKET_STATE, "only an agent can change this ticket's status");
 		}
 	}
 
-	private boolean isStaff(JwtPrincipal actor) {
-		return actor.role() == UserRole.AGENT || actor.role() == UserRole.ADMIN;
-	}
 }

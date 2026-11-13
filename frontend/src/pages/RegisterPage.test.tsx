@@ -72,7 +72,7 @@ describe('RegisterPage', () => {
     anonymousRefresh();
     server.use(
       http.post(`${BASE}/auth/register`, () =>
-        HttpResponse.json({ status: 409, code: 'email_already_exists' }, { status: 409 }),
+        HttpResponse.json({ status: 409, code: 'email_already_registered' }, { status: 409 }),
       ),
     );
 

@@ -7,7 +7,8 @@ the HNSW index built in :mod:`db` is actually used.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from pgvector import Vector
 from pgvector.psycopg import register_vector_async
@@ -16,16 +17,6 @@ from psycopg_pool import AsyncConnectionPool
 from .crypto import FieldCipher
 from .embeddings import Embedder
 from .schemas import KbDocumentIn, KbDocumentOut, KbSearchHit
-
-
-@dataclass(frozen=True)
-class KbDocumentRow:
-    id: str
-    external_id: str
-    title: str
-    body: str
-    category: str | None
-    score: float | None
 
 
 class KbRepository:
@@ -45,17 +36,29 @@ class KbRepository:
         self._embedder = embedder
         self._cipher = cipher
 
+    @asynccontextmanager
+    async def _cursor(self) -> AsyncIterator[object]:
+        """A cursor on a connection that already knows the vector type.
+
+        ``register_vector_async`` has to run once per connection, and forgetting
+        it makes ``embedding <=> %s`` fail with "no operator matches" while
+        INSERT still works — so it is worth having exactly one place that
+        cannot forget.
+        """
+        async with self._pool.connection() as conn:
+            await register_vector_async(conn)
+            async with conn.cursor() as cur:
+                yield cur
+
     async def upsert(self, doc: KbDocumentIn) -> KbDocumentOut:
         # Embedded before encryption: ciphertext has no semantics to embed.
         # Wrapping in Vector is what gives the bound parameter the `vector` type
         # OID. A bare list is sent as float8[], which Postgres can only coerce
         # when a target column supplies the type, it fails for `<=>` in search.
         vector = Vector(await self._embedder.embed(f"{doc.title}\n\n{doc.body}"))
-        async with self._pool.connection() as conn:
-            await register_vector_async(conn)
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
+        async with self._cursor() as cur:
+            await cur.execute(
+                """
                     INSERT INTO kb_documents
                         (external_id, title, body, category, embedding)
                     VALUES (%s, %s, %s, %s, %s)
@@ -67,15 +70,15 @@ class KbRepository:
                         updated_at = NOW()
                     RETURNING id, external_id, title, category, updated_at
                     """,
-                    (
-                        doc.external_id,
-                        self._cipher.encrypt(doc.title),
-                        self._cipher.encrypt(doc.body),
-                        doc.category,
-                        vector,
-                    ),
-                )
-                row = await cur.fetchone()
+                (
+                    doc.external_id,
+                    self._cipher.encrypt(doc.title),
+                    self._cipher.encrypt(doc.body),
+                    doc.category,
+                    vector,
+                ),
+            )
+            row = await cur.fetchone()
         assert row is not None  # RETURNING guarantees a row
         return KbDocumentOut(
             id=str(row[0]),
@@ -89,13 +92,11 @@ class KbRepository:
         if k <= 0:
             return []
         vector = Vector(await self._embedder.embed(query))
-        async with self._pool.connection() as conn:
-            await register_vector_async(conn)
-            async with conn.cursor() as cur:
-                # 1 - cosine_distance == cosine similarity; higher is better,
-                # so the ORDER BY on distance gives us "closest first".
-                await cur.execute(
-                    """
+        async with self._cursor() as cur:
+            # 1 - cosine_distance == cosine similarity; higher is better,
+            # so the ORDER BY on distance gives us "closest first".
+            await cur.execute(
+                """
                     SELECT id,
                            external_id,
                            title,
@@ -106,9 +107,9 @@ class KbRepository:
                     ORDER BY embedding <=> %s
                     LIMIT %s
                     """,
-                    (vector, vector, k),
-                )
-                rows = await cur.fetchall()
+                (vector, vector, k),
+            )
+            rows = await cur.fetchall()
         return [
             KbSearchHit(
                 id=str(row[0]),

@@ -1,7 +1,7 @@
 package com.ticketmind.backend.user;
 
-import com.ticketmind.backend.common.exception.LastAdminException;
-import com.ticketmind.backend.common.exception.TicketNotFoundException;
+import com.ticketmind.backend.common.exception.ErrorCode;
+import com.ticketmind.backend.common.exception.ApiException;
 import com.ticketmind.backend.security.jwt.JwtPrincipal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,12 +29,12 @@ public class UserService {
 		// Reuses the ticket 404 rather than adding a user_not_found code: the
 		// enumeration-resistance argument is identical, and the client should
 		// not learn whether an id exists.
-		return userRepository.findById(id).orElseThrow(TicketNotFoundException::new);
+		return userRepository.findById(id).orElseThrow(ErrorCode.USER_NOT_FOUND::exception);
 	}
 
 	@Transactional
 	public User changeRole(JwtPrincipal actor, UUID targetId, UserRole next) {
-		User target = userRepository.findById(targetId).orElseThrow(TicketNotFoundException::new);
+		User target = userRepository.findById(targetId).orElseThrow(ErrorCode.USER_NOT_FOUND::exception);
 		if (target.getRole() == next) {
 			return target;
 		}
@@ -42,7 +42,7 @@ public class UserService {
 		// the bootstrap only fires when zero admins exist, so this would be
 		// recoverable but only by a restart with config changed. Refuse.
 		if (target.getRole() == UserRole.ADMIN && !userRepository.existsByRoleAndIdNot(UserRole.ADMIN, targetId)) {
-			throw new LastAdminException();
+			throw new ApiException(ErrorCode.LAST_ADMIN);
 		}
 		target.changeRole(next);
 		return userRepository.save(target);

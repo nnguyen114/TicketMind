@@ -40,7 +40,11 @@ spring:
 
 server:
   port: ${BACKEND_PORT:8080}
-  forward-headers-strategy: framework
+  # native = Tomcat's RemoteIpValve, which applies X-Forwarded-For/-Proto only
+  # when the direct peer is an internal proxy (private/loopback ranges by
+  # default). `framework` applied them from anyone, so a client could forge its
+  # own IP and dodge the per-IP rate limits.
+  forward-headers-strategy: native
   error:
     include-message: never
     include-binding-errors: never

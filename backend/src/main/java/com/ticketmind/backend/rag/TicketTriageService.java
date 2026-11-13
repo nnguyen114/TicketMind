@@ -1,12 +1,13 @@
 package com.ticketmind.backend.rag;
 
-import com.ticketmind.backend.common.exception.TicketNotFoundException;
-import com.ticketmind.backend.common.exception.TriageDisabledException;
-import com.ticketmind.backend.common.exception.TriageFailedException;
+import com.ticketmind.backend.common.exception.ErrorCode;
+import com.ticketmind.backend.common.exception.ApiException;
 import com.ticketmind.backend.rag.dto.TriageResultPayload;
 import com.ticketmind.backend.security.jwt.JwtPrincipal;
-import com.ticketmind.backend.user.UserRole;
-import com.ticketmind.backend.ticket.TicketRepository;
+import com.ticketmind.backend.ticket.TicketPriority;
+import com.ticketmind.backend.ticket.TicketTriageGateway;
+import com.ticketmind.backend.ticket.TriageOutcome;
+import com.ticketmind.backend.ticket.TriageTarget;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,46 +20,41 @@ import java.util.UUID;
  *
  * <p>Intentionally not {@code @Transactional} at the class level: both methods
  * make an outbound HTTP call that can take seconds, and holding a Hikari
- * connection for that long would exhaust the pool under load. Reads run in the
- * repository's own short transaction, the network call happens with no
- * transaction open, and the write-back is delegated to
- * {@link TicketTriageWriter}.
+ * connection for that long would exhaust the pool under load. Reads and the
+ * write-back both go through {@link TicketTriageGateway}, which owns their
+ * transactions; the network call happens with none open.
  */
 @Service
 public class TicketTriageService {
 
 	private static final Logger log = LoggerFactory.getLogger(TicketTriageService.class);
 
-	private final TicketRepository ticketRepository;
+	private final TicketTriageGateway tickets;
 	private final RagClient ragClient;
-	private final TicketTriageWriter triageWriter;
 
-	public TicketTriageService(
-			TicketRepository ticketRepository,
-			RagClient ragClient,
-			TicketTriageWriter triageWriter) {
-		this.ticketRepository = ticketRepository;
+	public TicketTriageService(TicketTriageGateway tickets, RagClient ragClient) {
+		this.tickets = tickets;
 		this.ragClient = ragClient;
-		this.triageWriter = triageWriter;
 	}
 
 	/** Triage a freshly created ticket. No-op if it is already triaged. */
 	public void triage(UUID ticketId) {
-		Snapshot snapshot = loadSnapshot(ticketId);
-		if (snapshot == null) {
-			return;
-		}
-		if (snapshot.triaged()) {
+		Optional<TriageTarget> target = tickets.load(ticketId);
+		if (target.isEmpty() || target.get().triaged()) {
 			return;
 		}
 		Optional<TriageResultPayload> result =
-				ragClient.triage(ticketId, snapshot.title(), snapshot.description());
+				ragClient.triage(ticketId, target.get().title(), target.get().description());
 		if (result.isEmpty()) {
 			return;
 		}
-		if (triageWriter.applyTriage(ticketId, result.get())) {
+		Optional<TriageOutcome> outcome = toOutcome(ticketId, result.get());
+		if (outcome.isEmpty()) {
+			return;
+		}
+		if (tickets.apply(ticketId, outcome.get(), false)) {
 			log.info("triaged ticket {} as {}/{}", ticketId,
-					result.get().category(), result.get().priority());
+					outcome.get().category(), outcome.get().priority());
 		}
 	}
 
@@ -76,31 +72,24 @@ public class TicketTriageService {
 	 * fault of the ticket or the operator.
 	 */
 	public void retriage(JwtPrincipal actor, UUID ticketId) {
-		if (!isStaff(actor)) {
+		if (!actor.role().isStaff()) {
 			// Matches TicketService.assign: a non-staff caller learns nothing
 			// about which ticket ids exist.
-			throw new TicketNotFoundException();
+			throw new ApiException(ErrorCode.TICKET_NOT_FOUND);
 		}
 		if (!ragClient.isEnabled()) {
-			throw new TriageDisabledException();
+			throw new ApiException(ErrorCode.TRIAGE_DISABLED);
 		}
-		Snapshot snapshot = loadSnapshot(ticketId);
-		if (snapshot == null) {
-			throw new TicketNotFoundException();
-		}
+		TriageTarget target = tickets.load(ticketId).orElseThrow(ErrorCode.TICKET_NOT_FOUND::exception);
 		TriageResultPayload result = ragClient
-				.triage(ticketId, snapshot.title(), snapshot.description())
-				.orElseThrow(TriageFailedException::new);
-		if (!triageWriter.applyTriage(ticketId, result, true)) {
-			// The call succeeded but the result was unusable, an unknown
-			// priority, or the ticket vanished mid-flight.
-			throw new TriageFailedException();
+				.triage(ticketId, target.title(), target.description())
+				.orElseThrow(ErrorCode.TRIAGE_FAILED::exception);
+		TriageOutcome outcome = toOutcome(ticketId, result).orElseThrow(ErrorCode.TRIAGE_FAILED::exception);
+		if (!tickets.apply(ticketId, outcome, true)) {
+			// The write found no ticket: it was deleted mid-flight.
+			throw new ApiException(ErrorCode.TRIAGE_FAILED);
 		}
-		log.info("re-triaged ticket {} as {}/{}", ticketId, result.category(), result.priority());
-	}
-
-	private boolean isStaff(JwtPrincipal actor) {
-		return actor.role() == UserRole.AGENT || actor.role() == UserRole.ADMIN;
+		log.info("re-triaged ticket {} as {}/{}", ticketId, outcome.category(), outcome.priority());
 	}
 
 	/**
@@ -110,28 +99,29 @@ public class TicketTriageService {
 	 * again.
 	 */
 	public void publishResolvedTicket(UUID ticketId) {
-		Snapshot snapshot = loadSnapshot(ticketId);
-		if (snapshot == null) {
-			return;
-		}
-		ragClient.upsertKnowledgeBaseDocument(
-				ticketId, snapshot.title(), snapshot.description(), snapshot.category());
-	}
-
-	// No @Transactional: this is called from within the class, so a proxy-based
-	// annotation would be silently inert. It doesn't need one, findById runs
-	// in the repository's own transaction and every field read here is eager.
-	private Snapshot loadSnapshot(UUID ticketId) {
-		return ticketRepository.findById(ticketId)
-				.map(t -> new Snapshot(
-						t.getTitle(), t.getDescription(), t.getCategory(), t.getTriagedAt() != null))
-				.orElse(null);
+		tickets.load(ticketId).ifPresent(target -> ragClient.upsertKnowledgeBaseDocument(
+				ticketId, target.title(), target.description(), target.category()));
 	}
 
 	/**
-	 * Detached copy of the fields the RAG service needs. Passing the entity
-	 * around would risk lazy loading outside a session on the async thread.
+	 * Translate the wire payload into the ticket module's vocabulary. Empty when
+	 * the service sent a priority outside the four the database accepts, which
+	 * is the one part of the reply this side cannot repair.
 	 */
-	record Snapshot(String title, String description, String category, boolean triaged) {
+	private Optional<TriageOutcome> toOutcome(UUID ticketId, TriageResultPayload result) {
+		Optional<TicketPriority> priority = TicketPriority.parse(result.priority());
+		if (priority.isEmpty()) {
+			log.warn("discarding triage for ticket {}: unknown priority {}",
+					ticketId, result.priority());
+			return Optional.empty();
+		}
+		return Optional.of(new TriageOutcome(
+				result.category(),
+				priority.get(),
+				result.suggestedResolution(),
+				result.summary(),
+				result.citationsOrEmpty().stream()
+						.map(TriageResultPayload.Citation::externalId)
+						.toList()));
 	}
 }

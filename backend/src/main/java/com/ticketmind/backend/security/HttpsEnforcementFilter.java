@@ -1,5 +1,6 @@
 package com.ticketmind.backend.security;
 
+import com.ticketmind.backend.common.web.RequestPaths;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,8 +23,8 @@ import java.io.IOException;
  * request is a GET for a document and a redirect is the right answer.
  *
  * <p>{@code request.isSecure()} reflects {@code X-Forwarded-Proto} because
- * {@code server.forward-headers-strategy: framework} installs Spring's
- * {@code ForwardedHeaderFilter} ahead of this one.
+ * {@code server.forward-headers-strategy: native} installs Tomcat's
+ * {@code RemoteIpValve}, which applies it when the peer is a trusted proxy.
  *
  * <p>Actuator is exempt. The container healthcheck probes
  * {@code http://localhost:8080/actuator/health} over the loopback interface,
@@ -36,11 +37,7 @@ public class HttpsEnforcementFilter extends OncePerRequestFilter {
 
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
-		// Derived from the request URI rather than getServletPath(): the latter
-		// is populated by the container's servlet mapping and comes back empty
-		// under MockMvc, which silently turned this exemption off in the very
-		// test written to prove it works.
-		String path = request.getRequestURI().substring(request.getContextPath().length());
+		String path = RequestPaths.of(request);
 		return path.equals("/actuator") || path.startsWith(ACTUATOR_PREFIX);
 	}
 

@@ -2,9 +2,9 @@ import { env } from '@/lib/env';
 import { ApiError, NetworkError, apiErrorSchema } from './errors';
 import { tokenStore } from './tokenStore';
 
-export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
-export interface RequestOptions {
+interface RequestOptions {
   method?: HttpMethod;
   body?: unknown;
   signal?: AbortSignal;

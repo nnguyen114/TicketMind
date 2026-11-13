@@ -28,7 +28,6 @@ class SchemaMigrationTest {
 	void allExpectedTablesExist() {
 		assertThat(visibleTables()).contains(
 				"refresh_tokens",
-				"ticket_embeddings",
 				"ticket_history",
 				"tickets",
 				"users");
@@ -77,12 +76,24 @@ class SchemaMigrationTest {
 	}
 
 	@Test
-	void ticketEmbeddingsHasHnswCosineIndex() {
-		Integer hnswCount = jdbc.queryForObject(
-				"SELECT COUNT(*) FROM pg_indexes " +
-						"WHERE tablename = 'ticket_embeddings' AND indexdef ILIKE '%hnsw%vector_cosine_ops%'",
+	void ticketEmbeddingsIsGone() {
+		assertThat(visibleTables())
+				.as("V4 drops the table the backend never wrote to")
+				.doesNotContain("ticket_embeddings");
+	}
+
+	/**
+	 * V4 drops the table but must leave the extension behind. The RAG service
+	 * issues its own CREATE EXTENSION IF NOT EXISTS on boot, and compose orders
+	 * startup so Flyway always wins that race; without the extension already
+	 * installed, the two would be racing again.
+	 */
+	@Test
+	void vectorExtensionSurvivesTheDrop() {
+		Integer installed = jdbc.queryForObject(
+				"SELECT COUNT(*) FROM pg_extension WHERE extname = 'vector'",
 				Integer.class);
-		assertThat(hnswCount).isEqualTo(1);
+		assertThat(installed).isEqualTo(1);
 	}
 
 	@Test

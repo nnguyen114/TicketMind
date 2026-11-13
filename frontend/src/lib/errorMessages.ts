@@ -2,13 +2,15 @@ import { ApiError, NetworkError } from '@/api/errors';
 
 const codeMessages: Record<string, string> = {
   invalid_credentials: 'Email or password is incorrect.',
-  email_already_exists: 'An account with that email already exists.',
+  email_already_registered: 'An account with that email already exists.',
   account_locked: 'This account is temporarily locked. Try again shortly.',
   password_policy: 'That password does not meet the security requirements.',
   invalid_refresh_token: 'Your session has expired. Please sign in again.',
   rate_limit_exceeded: 'Too many attempts. Please slow down and try again.',
   validation_error: 'Please fix the highlighted fields and try again.',
   not_found: 'We could not find that resource.',
+  ticket_not_found: 'We could not find that ticket.',
+  user_not_found: 'We could not find that user.',
   invalid_ticket_state: 'That action is not allowed in the ticket’s current state.',
   agent_required: 'The assignee must be an active agent or admin.',
   forbidden: 'You do not have permission to do that.',

@@ -113,13 +113,9 @@ public class User {
 	public UUID getId() { return id; }
 	public String getEmail() { return email; }
 	public String getPasswordHash() { return passwordHash; }
-	public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 	public String getDisplayName() { return displayName; }
 	public UserRole getRole() { return role; }
 	public boolean isActive() { return active; }
-	public int getFailedLoginAttempts() { return failedLoginAttempts; }
-	public Instant getLockedUntil() { return lockedUntil; }
-	public Instant getLastLoginAt() { return lastLoginAt; }
 	public Instant getCreatedAt() { return createdAt; }
 	public Instant getUpdatedAt() { return updatedAt; }
 }

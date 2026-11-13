@@ -65,10 +65,13 @@ public class RefreshTokenService {
 			throw new InvalidRefreshTokenException();
 		}
 		User user = stored.getUser();
-		// Force lazy User to initialize inside this transaction; caller runs
-		// outside any transaction so the session is gone by the time it
-		// reads email/role.
-		user.getEmail();
+		// Login refuses deactivated accounts; without this a refresh token
+		// issued before deactivation would keep minting access tokens until it
+		// expired. Also initialises the lazy User inside this transaction,
+		// since the caller reads email/role after the session is gone.
+		if (!user.isActive()) {
+			throw new InvalidRefreshTokenException();
+		}
 		String newRaw = generateRawToken();
 		String newHash = sha256(newRaw);
 		Instant expiresAt = now.plus(jwtProperties.refreshTokenTtl());
@@ -82,11 +85,6 @@ public class RefreshTokenService {
 	public void revoke(String presentedRawToken) {
 		String hash = sha256(presentedRawToken);
 		repository.findByTokenHash(hash).ifPresent(t -> t.revoke(clock.instant()));
-	}
-
-	@Transactional
-	public void revokeAllForUser(User user) {
-		repository.revokeAllForUser(user.getId(), clock.instant());
 	}
 
 	private String generateRawToken() {

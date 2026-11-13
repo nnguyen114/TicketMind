@@ -24,12 +24,14 @@ public class RagClient {
 
 	private static final Logger log = LoggerFactory.getLogger(RagClient.class);
 
-	// The RAG service caps title at 256 and body at 32000 characters and
-	// answers 422 above them. Ticket titles are already bounded at 200 by the
-	// column, but descriptions are TEXT, truncate rather than let a long
-	// ticket silently fail triage.
-	private static final int MAX_TITLE = 256;
-	private static final int MAX_BODY = 32_000;
+	// The RAG service caps title at 256 and body at 32000 and answers 422 above
+	// them. Nothing here truncates to those: TicketLimits already holds every
+	// ticket well under both, and silently shortening a user's report to fit an
+	// internal call would be worse than the 422 it avoids. Raising TicketLimits
+	// past the RAG service's caps is the thing to not do.
+	//
+	// Category is different - it comes back from Claude, not from a validated
+	// request, and tickets.category is VARCHAR(64).
 	private static final int MAX_CATEGORY = 64;
 
 	private final RestClient restClient;
@@ -50,9 +52,7 @@ public class RagClient {
 			return Optional.empty();
 		}
 		TriageRequestPayload payload = new TriageRequestPayload(
-				ticketId.toString(),
-				truncate(title, MAX_TITLE),
-				truncate(description, MAX_BODY));
+				ticketId.toString(), title, description);
 		try {
 			TriageResultPayload result = restClient.post()
 					.uri("/triage")
@@ -74,10 +74,7 @@ public class RagClient {
 			return false;
 		}
 		KbDocumentPayload payload = new KbDocumentPayload(
-				ticketId.toString(),
-				truncate(title, MAX_TITLE),
-				truncate(body, MAX_BODY),
-				truncate(category, MAX_CATEGORY));
+				ticketId.toString(), title, body, truncate(category, MAX_CATEGORY));
 		try {
 			restClient.post()
 					.uri("/kb/documents")

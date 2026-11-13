@@ -140,15 +140,14 @@ class UserRoleManagementTest {
 	void theBootstrapPromotesTheConfiguredAccountOnlyWhileNoAdminExists() {
 		// With an ADMIN present the bootstrap must be inert, otherwise a
 		// deliberate demotion would silently undo itself on every restart.
-		AdminBootstrap bootstrap = new AdminBootstrap();
-		bootstrap.promote(userRepository, propertiesWithBootstrap("alice@example.com"));
+		runBootstrap("alice@example.com");
 		assertThat(userRepository.findById(alice.getId()).orElseThrow().getRole())
 				.isEqualTo(UserRole.USER);
 
 		// Remove the only admin and it takes effect.
 		userRepository.delete(admin);
 		userRepository.flush();
-		bootstrap.promote(userRepository, propertiesWithBootstrap("alice@example.com"));
+		runBootstrap("alice@example.com");
 		assertThat(userRepository.findById(alice.getId()).orElseThrow().getRole())
 				.isEqualTo(UserRole.ADMIN);
 	}
@@ -157,13 +156,15 @@ class UserRoleManagementTest {
 	void theBootstrapIsANoOpWhenUnsetOrPointingAtNobody() {
 		userRepository.delete(admin);
 		userRepository.flush();
-		AdminBootstrap bootstrap = new AdminBootstrap();
-
-		bootstrap.promote(userRepository, propertiesWithBootstrap(null));
-		bootstrap.promote(userRepository, propertiesWithBootstrap("   "));
-		bootstrap.promote(userRepository, propertiesWithBootstrap("nobody@example.com"));
+		runBootstrap(null);
+		runBootstrap("   ");
+		runBootstrap("nobody@example.com");
 
 		assertThat(userRepository.existsByRole(UserRole.ADMIN)).isFalse();
+	}
+
+	private void runBootstrap(String email) {
+		new AdminBootstrap(userRepository, propertiesWithBootstrap(email)).run(null);
 	}
 
 	private AuthProperties propertiesWithBootstrap(String email) {

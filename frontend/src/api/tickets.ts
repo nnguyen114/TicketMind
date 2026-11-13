@@ -1,23 +1,18 @@
 import { z } from 'zod';
 import { apiFetch } from './client';
+import {
+  TICKET_HISTORY_EVENTS,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  type TicketSort,
+  type TicketStatus,
+} from '@/domain/ticket';
 
-export const ticketStatusSchema = z.enum(['OPEN', 'IN_PROGRESS', 'WAITING', 'RESOLVED', 'CLOSED']);
-export type TicketStatus = z.infer<typeof ticketStatusSchema>;
+export type { TicketPriority, TicketSort, TicketStatus } from '@/domain/ticket';
 
-export const ticketPrioritySchema = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
-export type TicketPriority = z.infer<typeof ticketPrioritySchema>;
-
-export const ticketHistoryEventSchema = z.enum([
-  'CREATED',
-  'UPDATED',
-  'STATUS_CHANGED',
-  'ASSIGNED',
-  'TRIAGED',
-  'COMMENT',
-  'RESOLVED',
-  'REOPENED',
-]);
-export type TicketHistoryEvent = z.infer<typeof ticketHistoryEventSchema>;
+const ticketStatusSchema = z.enum(TICKET_STATUSES);
+const ticketPrioritySchema = z.enum(TICKET_PRIORITIES);
+const ticketHistoryEventSchema = z.enum(TICKET_HISTORY_EVENTS);
 
 const userSummarySchema = z
   .object({
@@ -26,9 +21,8 @@ const userSummarySchema = z
     email: z.string(),
   })
   .nullable();
-export type UserSummary = z.infer<typeof userSummarySchema>;
 
-export const ticketSummarySchema = z.object({
+const ticketSummarySchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
   status: ticketStatusSchema,
@@ -39,9 +33,8 @@ export const ticketSummarySchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-export type TicketSummary = z.infer<typeof ticketSummarySchema>;
 
-export const ticketDetailSchema = ticketSummarySchema.extend({
+const ticketDetailSchema = ticketSummarySchema.extend({
   description: z.string(),
   suggestedResolution: z.string().nullable().optional(),
   triagedAt: z.string().nullable().optional(),
@@ -49,7 +42,7 @@ export const ticketDetailSchema = ticketSummarySchema.extend({
 });
 export type TicketDetail = z.infer<typeof ticketDetailSchema>;
 
-export const pagedTicketsSchema = z.object({
+const pagedTicketsSchema = z.object({
   content: z.array(ticketSummarySchema),
   page: z.number().int(),
   size: z.number().int(),
@@ -58,7 +51,7 @@ export const pagedTicketsSchema = z.object({
 });
 export type PagedTickets = z.infer<typeof pagedTicketsSchema>;
 
-export const historyEntrySchema = z.object({
+const historyEntrySchema = z.object({
   id: z.string().uuid(),
   eventType: ticketHistoryEventSchema,
   actor: userSummarySchema,
@@ -66,21 +59,33 @@ export const historyEntrySchema = z.object({
   createdAt: z.string(),
 });
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
+export type { TicketHistoryEvent } from '@/domain/ticket';
 
-export const TICKET_SORTS = [
-  'NEWEST',
-  'OLDEST',
-  'RECENTLY_UPDATED',
-  'PRIORITY_HIGH_FIRST',
-  'PRIORITY_LOW_FIRST',
-] as const;
-export type TicketSort = (typeof TICKET_SORTS)[number];
-
-export interface ListParams {
+interface ListParams {
   status?: TicketStatus | undefined;
   sort?: TicketSort | undefined;
   page?: number;
   size?: number;
+}
+
+// The cache keys for every ticket query, in one place. Query keys are matched
+// by prefix, so `detail(id)` also covers `history(id)` — anything invalidating
+// the detail does not additionally need to name the history.
+export const ticketKeys = {
+  all: ['tickets'] as const,
+  list: (params: { status: TicketStatus | null; sort: TicketSort; page: number }) =>
+    ['tickets', params] as const,
+  detail: (id: string) => ['ticket', id] as const,
+  history: (id: string) => ['ticket', id, 'history'] as const,
+};
+
+/** Every endpoint below is "call it, then parse it" — this is that, once. */
+async function parsed<T>(
+  schema: z.ZodType<T>,
+  path: string,
+  options?: Parameters<typeof apiFetch>[1],
+): Promise<T> {
+  return schema.parse(await apiFetch<unknown>(path, options));
 }
 
 export async function listTickets(params: ListParams = {}): Promise<PagedTickets> {
@@ -90,67 +95,48 @@ export async function listTickets(params: ListParams = {}): Promise<PagedTickets
   if (params.page !== undefined) search.set('page', String(params.page));
   if (params.size !== undefined) search.set('size', String(params.size));
   const query = search.toString();
-  const payload = await apiFetch<unknown>(`/tickets${query ? `?${query}` : ''}`);
-  return pagedTicketsSchema.parse(payload);
+  return parsed(pagedTicketsSchema, `/tickets${query ? `?${query}` : ''}`);
 }
 
 export async function getTicket(id: string): Promise<TicketDetail> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}`);
-  return ticketDetailSchema.parse(payload);
+  return parsed(ticketDetailSchema, `/tickets/${id}`);
 }
 
 export async function createTicket(input: {
   title: string;
   description: string;
 }): Promise<TicketDetail> {
-  const payload = await apiFetch<unknown>('/tickets', {
-    method: 'POST',
-    body: input,
-  });
-  return ticketDetailSchema.parse(payload);
+  return parsed(ticketDetailSchema, '/tickets', { method: 'POST', body: input });
 }
 
 export async function updateTicket(
   id: string,
   input: { title: string; description: string },
 ): Promise<TicketDetail> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}`, {
-    method: 'PATCH',
-    body: input,
-  });
-  return ticketDetailSchema.parse(payload);
+  return parsed(ticketDetailSchema, `/tickets/${id}`, { method: 'PATCH', body: input });
 }
 
 export async function changeTicketStatus(id: string, status: TicketStatus): Promise<TicketDetail> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}/status`, {
-    method: 'POST',
-    body: { status },
-  });
-  return ticketDetailSchema.parse(payload);
+  return parsed(ticketDetailSchema, `/tickets/${id}/status`, { method: 'POST', body: { status } });
 }
 
 export async function assignTicket(id: string, assigneeId: string | null): Promise<TicketDetail> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}/assign`, {
+  return parsed(ticketDetailSchema, `/tickets/${id}/assign`, {
     method: 'POST',
     body: { assigneeId },
   });
-  return ticketDetailSchema.parse(payload);
 }
 
 export async function retriageTicket(id: string): Promise<TicketDetail> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}/triage`, { method: 'POST' });
-  return ticketDetailSchema.parse(payload);
+  return parsed(ticketDetailSchema, `/tickets/${id}/triage`, { method: 'POST' });
 }
 
 export async function addComment(id: string, body: string): Promise<HistoryEntry> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}/comments`, {
-    method: 'POST',
-    body: { body },
-  });
-  return historyEntrySchema.parse(payload);
+  return parsed(historyEntrySchema, `/tickets/${id}/comments`, { method: 'POST', body: { body } });
 }
 
 export async function getHistory(id: string): Promise<HistoryEntry[]> {
-  const payload = await apiFetch<unknown>(`/tickets/${id}/history`);
-  return z.array(historyEntrySchema).parse(payload);
+  return parsed(z.array(historyEntrySchema), `/tickets/${id}/history`);
 }
+
+export { TICKET_BODY_MAX, TICKET_SORTS, TICKET_STATUSES, TICKET_TITLE_MAX } from '@/domain/ticket';

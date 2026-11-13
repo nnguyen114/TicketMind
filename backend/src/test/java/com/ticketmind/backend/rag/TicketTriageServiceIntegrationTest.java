@@ -9,6 +9,7 @@ import com.ticketmind.backend.ticket.TicketHistoryEventType;
 import com.ticketmind.backend.ticket.TicketHistoryRepository;
 import com.ticketmind.backend.ticket.TicketPriority;
 import com.ticketmind.backend.ticket.TicketRepository;
+import com.ticketmind.backend.ticket.TicketTriageGateway;
 import com.ticketmind.backend.user.RefreshTokenRepository;
 import com.ticketmind.backend.user.User;
 import com.ticketmind.backend.user.UserRepository;
@@ -56,7 +57,7 @@ class TicketTriageServiceIntegrationTest {
 	@Autowired private TicketHistoryRepository historyRepository;
 	@Autowired private UserRepository userRepository;
 	@Autowired private RefreshTokenRepository refreshTokenRepository;
-	@Autowired private TicketTriageWriter triageWriter;
+	@Autowired private TicketTriageGateway triageGateway;
 
 	// ObjectMapper is not an autowireable bean in these slices.
 	private final ObjectMapper objectMapper = new ObjectMapper();
@@ -82,7 +83,7 @@ class TicketTriageServiceIntegrationTest {
 				true, URI.create(BASE_URL), "test-internal-key",
 				Duration.ofSeconds(1), Duration.ofSeconds(2));
 		RagClient ragClient = new RagClient(builder.build(), properties);
-		this.service = new TicketTriageService(ticketRepository, ragClient, triageWriter);
+		this.service = new TicketTriageService(triageGateway, ragClient);
 	}
 
 	@Test

@@ -13,7 +13,7 @@ import java.util.UUID;
 /**
  * Login bookkeeping lives in its own bean so the failed-attempt counter
  * commits in its own transaction, even when the surrounding login flow
- * throws InvalidCredentialsException (which would otherwise roll back
+ * throws ApiException(INVALID_CREDENTIALS) (which would otherwise roll back
  * the increment).
  */
 @Component

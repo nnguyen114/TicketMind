@@ -84,8 +84,6 @@ public class RefreshToken {
 	public UUID getId() { return id; }
 	public User getUser() { return user; }
 	public String getTokenHash() { return tokenHash; }
-	public Instant getIssuedAt() { return issuedAt; }
 	public Instant getExpiresAt() { return expiresAt; }
 	public Instant getRevokedAt() { return revokedAt; }
-	public UUID getReplacedById() { return replacedById; }
 }

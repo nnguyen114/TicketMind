@@ -121,15 +121,11 @@ public class AuthController {
 		return ua.length() > 512 ? ua.substring(0, 512) : ua;
 	}
 
+	// Never read X-Forwarded-For here: the client writes that header, so trusting
+	// it lets anyone rotate a fake IP per request and walk past the per-IP
+	// limits. Tomcat's RemoteIpValve (forward-headers-strategy: native) only
+	// honours it when the direct peer is a trusted internal proxy.
 	private String ipAddress(HttpServletRequest http) {
-		String forwarded = http.getHeader("X-Forwarded-For");
-		if (forwarded != null && !forwarded.isBlank()) {
-			int comma = forwarded.indexOf(',');
-			String first = (comma >= 0 ? forwarded.substring(0, comma) : forwarded).trim();
-			if (!first.isEmpty()) {
-				return first;
-			}
-		}
 		return http.getRemoteAddr();
 	}
 }

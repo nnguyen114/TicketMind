@@ -3,9 +3,9 @@ package com.ticketmind.backend.user;
 import com.ticketmind.backend.security.AuthProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -19,20 +19,28 @@ import org.springframework.transaction.annotation.Transactional;
  * idempotent and, more importantly, means it cannot be used to silently
  * re-grant privileges: once a real admin exists, demoting the bootstrap
  * account stays demoted across restarts.
+ *
+ * <p>A {@code @Component} implementing {@link ApplicationRunner}, not a
+ * {@code @Configuration} handing back a lambda. The lambda form called
+ * {@code promote} on {@code this} rather than through the proxy, so the
+ * {@code @Transactional} on it never took effect.
  */
-@Configuration
-public class AdminBootstrap {
+@Component
+public class AdminBootstrap implements ApplicationRunner {
 
 	private static final Logger log = LoggerFactory.getLogger(AdminBootstrap.class);
 
-	@Bean
-	public ApplicationRunner promoteBootstrapAdmin(
-			UserRepository userRepository, AuthProperties authProperties) {
-		return args -> promote(userRepository, authProperties);
+	private final UserRepository userRepository;
+	private final AuthProperties authProperties;
+
+	public AdminBootstrap(UserRepository userRepository, AuthProperties authProperties) {
+		this.userRepository = userRepository;
+		this.authProperties = authProperties;
 	}
 
+	@Override
 	@Transactional
-	void promote(UserRepository userRepository, AuthProperties authProperties) {
+	public void run(ApplicationArguments args) {
 		String email = authProperties.bootstrapAdminEmail();
 		if (email == null || email.isBlank()) {
 			return;

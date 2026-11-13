@@ -24,6 +24,8 @@ TicketMind is an AI-assisted support ticket triage system: users open tickets th
 
 ## Commands
 
+
+
 ```bash
 # One-time per clone: enable the repo's secret-scanning pre-commit hook.
 git config core.hooksPath .githooks
@@ -109,8 +111,9 @@ These are non-obvious choices that future code must keep consistent.
 
 - Triage is **asynchronous and best-effort**. `TicketService` publishes `TicketCreatedEvent` / `TicketResolvedEvent`; `RagTicketListener` handles them `@Async("ragTaskExecutor")` on `AFTER_COMMIT`. `POST /tickets` therefore answers 201 with `category`/`priority`/`triagedAt` still null. The client sees them appear on a later fetch. A RAG outage never fails ticket submission.
 - `AFTER_COMMIT` is load-bearing twice over: triage must not run against a transaction that then rolls back, and the write-back reads the ticket on a second connection, which cannot see an uncommitted row.
-- `TicketTriageWriter` is a separate bean from `TicketTriageService` for the same reason `LoginAttemptRecorder` is separate from `AuthService`, the orchestration must not hold a DB connection across a multi-second Claude call, but the ticket update and its TRIAGED history row must land in one transaction. A `@Transactional` method on the same class would self-invoke past the proxy and split them.
-- **Priority vocabulary is owned by the database.** `tickets_priority_check` in V1 allows `LOW/MEDIUM/HIGH/CRITICAL` only. `TicketTriageWriter` rejects unknown values rather than letting them reach the constraint. `TicketTriageServiceIntegrationTest` asserts every enum value round-trips, so a future drift fails loudly.
+- **The rag package never holds a ticket repository.** Everything it does to a ticket goes through `ticket.TicketTriageGateway` — `load` for the fields triage needs, `apply` for the write-back. Triage used to reach into `TicketRepository` and `TicketHistoryRepository` directly, which made it a second owner of the audit-trail invariant with its own copy of the payload-building logic. `ArchitectureBoundaryTest` pins both halves of the rule: `ticket` must not import `rag`, and `rag` must not import a ticket repository.
+- `TicketTriageWriter` (the gateway implementation, in the `ticket` package) is a separate bean from `TicketTriageService` for the same reason `LoginAttemptRecorder` is separate from `AuthService`, the orchestration must not hold a DB connection across a multi-second Claude call, but the ticket update and its TRIAGED history row must land in one transaction. A `@Transactional` method on the same class would self-invoke past the proxy and split them.
+- **Priority vocabulary is owned by the database.** `tickets_priority_check` in V1 allows `LOW/MEDIUM/HIGH/CRITICAL` only. `TicketPriority.parse` rejects unknown values at the rag boundary rather than letting them reach the constraint, so a `TriageOutcome` always carries a priority the schema accepts. `TicketTriageServiceIntegrationTest` asserts every enum value round-trips, so a future drift fails loudly.
 - The TRIAGED history row has a **null actor**. No human performed it, and `ticket_history.actor_id` is nullable for exactly this case. The frontend `Timeline` renders that as "System".
 - `app.rag.enabled` defaults to **false** so a bare `mvnw spring-boot:run` works without a RAG key. When it is true, a blank `app.rag.internal-key` fails startup. Silently sending unauthenticated requests would 401 on every call and look like "triage just doesn't work".
 - The RAG executor's queue is bounded and overflow is **dropped, not run on the caller**: the caller is the thread that just committed a ticket, so `CallerRunsPolicy` would turn a RAG backlog into user-visible latency on `POST /tickets`.
@@ -154,15 +157,18 @@ These are non-obvious choices that future code must keep consistent.
 **Re-triage endpoint:**
 
 - `POST /tickets/{id}/triage` re-runs triage on demand. Added because provider rate limits make a failed automatic triage routine. Voyage's free tier allows **3 requests a minute**, so a burst of tickets leaves some untriaged with nothing actually wrong.
+- It lives in `rag.RetriageController`, **not** `TicketController`, even though the URL sits under `/tickets`. Routing it through the ticket controller made the `ticket` package import `rag` while `rag` already imported `ticket`, closing a dependency cycle between them. The URL is about the resource; the package is about who owns the behaviour.
 - **Synchronous, and it reports failure**, the opposite of the automatic path. The post-commit listener degrades silently on purpose; this one is a button somebody pressed, so silence would be useless. Failures surface as 502 `triage_failed` or 503 `triage_disabled` (the latter distinguishes "never configured" from "call didn't work").
 - **Staff only, and a non-staff caller gets 404, not 403**. Matching `TicketService.assign`, so ticket ids stay unguessable.
-- It **overwrites** an existing result and **appends a second TRIAGED row** with `retriggered: true` rather than editing the first. The audit trail should show that a human asked for another opinion. `TicketTriageWriter.applyTriage` takes a `force` flag for this; the automatic path stays first-write-wins so two racing listeners cannot produce two rows.
+- It **overwrites** an existing result and **appends a second TRIAGED row** with `retriggered: true` rather than editing the first. The audit trail should show that a human asked for another opinion. `TicketTriageGateway.apply` takes a `force` flag for this; the automatic path stays first-write-wins so two racing listeners cannot produce two rows.
 
 **Error envelope:**
 
-- All domain exceptions extend `com.ticketmind.backend.common.exception.ApiException` (status + stable machine code). `GlobalExceptionHandler` translates them to `ApiError { status, code, fieldErrors? }`. Exception messages are **never** returned to the client. Only the code. The generic `Exception` handler logs the real cause and returns `internal_error` with HTTP 500, so internal class names / messages don't leak.
+- Every error the API can return lives in one enum, `common.exception.ErrorCode` (status + stable machine code), and is thrown as `ApiException`. It replaced thirteen near-identical exception classes whose only content was those two values. `GlobalExceptionHandler` translates them to `ApiError { status, code, fieldErrors? }`. Exception messages are **never** returned to the client. Only the code.
+- Two subclasses survive, and only because they carry something the enum cannot. `InvalidRefreshTokenException` is named in `noRollbackFor`, so `ErrorCode.INVALID_REFRESH_TOKEN.exception()` hands back that exact type rather than trusting call sites to remember. `RateLimitExceededException` carries `Retry-After` via an overridable `headers()`, which is why the handler no longer type-tests for it. The generic `Exception` handler logs the real cause and returns `internal_error` with HTTP 500, so internal class names / messages don't leak.
 - `NoResourceFoundException` has an explicit handler returning 404 `not_found`; without it, Spring Boot 4 routes it through the generic handler and returns 500.
 - `ApiException` is shared by every domain, not just auth, so ticket and user errors use the same envelope.
+- **Ticket text limits live in `ticket.TicketLimits`**, referenced by the request DTOs' `@Size` and mirrored in the frontend's `domain/ticket.ts`. `RagClient` no longer truncates title or body: the RAG service caps at 256 / 32000, the DTOs cap below that, so the truncation was unreachable — and would have silently shortened a user's report if it ever fired. `RagClientTest` asserts the limits stay under the RAG service's caps, which is the constraint that actually matters.
 
 **Data protection (V3):**
 
@@ -186,7 +192,7 @@ These are non-obvious choices that future code must keep consistent.
 **Security wiring:**
 
 - `SecurityConfig` is stateless: no sessions, CSRF disabled (we use Bearer tokens for data endpoints), form login / HTTP basic / Spring's logout all disabled. HSTS 1y `includeSubDomains`, frame options DENY, referrer policy NO_REFERRER, a `default-src 'none'` CSP, and a Permissions-Policy that denies every device API.
-- **`HttpsEnforcementFilter` refuses any request that did not arrive over TLS**, gated on `app.security.require-https` (default true; dev and test set it false). `request.isSecure()` reflects `X-Forwarded-Proto` because `server.forward-headers-strategy: framework` installs Spring's `ForwardedHeaderFilter` ahead of it. TLS is assumed to terminate upstream rather than in these containers.
+- **`HttpsEnforcementFilter` refuses any request that did not arrive over TLS**, gated on `app.security.require-https` (default true; dev and test set it false). `request.isSecure()` reflects `X-Forwarded-Proto` because `server.forward-headers-strategy: native` installs Tomcat's `RemoteIpValve`, which honours forwarded headers only from an internal-proxy peer (private/loopback ranges). `AuthController` keys rate limits on `getRemoteAddr()` for the same reason: `framework` applied `X-Forwarded-For` from anyone, so a client could forge a fresh IP per request. TLS is assumed to terminate upstream rather than in these containers.
 - It **refuses rather than redirects**, which is the right shape for an API: a 301 on a POST loses the body, browsers will not re-send it, and a cross-origin redirect drops the `Authorization` header, so a redirect would turn one clear misconfiguration into several confusing partial failures. Browser traffic is redirected at the edge in nginx, where the request is a GET for a document.
 - **Actuator is exempt**, and that exemption is load-bearing: the container healthcheck probes `http://localhost:8080/actuator/health` over loopback, and compose gates both the RAG service and the frontend on the backend reporting healthy.
 - The gate is a **property, not a profile check**. Keying it off the active profile put it beyond the reach of the whole suite — dev and test both disable it, and those are the only profiles the tests run under. `HttpsEnforcementIntegrationTest` forces the property on and boots the full context, which is most of the value: the failure this replaced was a context-startup error, not a behavioural one.
@@ -197,6 +203,11 @@ These are non-obvious choices that future code must keep consistent.
 - `@EnableMethodSecurity` is on; method-level `@PreAuthorize("hasRole('AGENT')")` etc. works.
 
 **Frontend:**
+
+- **`src/domain/` owns the vocabulary** — ticket statuses, priorities, sorts, roles, their labels, and the length limits. It imports nothing. `api/` builds its Zod schemas from those tuples, so the transport layer no longer owns the domain types and `lib/` and `components/` stopped importing upward from `api/` to name a status.
+- Shared visual primitives live in `components/ui.tsx` (`Button`, `Card`, `ErrorText`, `PageHeading`, `SectionHeading`, `Muted`) and `components/FormField.tsx` (`FormField`, `FormTextArea`, `FormSelect`). Before them the same outline button existed in six files with the tokens in a different order in two, and `role="alert"` was hand-written on ten error paragraphs. Add a variant rather than a new class string.
+- `hooks/useApiMutation` owns the "error message" state every mutating component was declaring itself, and clears it on each attempt.
+- `pages/tickets/useInvalidateTicket` is the single answer to "what goes stale when a ticket changes". Query keys come from `ticketKeys` in `api/tickets.ts`; because keys match by prefix, invalidating `detail(id)` also covers `history(id)`.
 
 - Access token lives in module memory only (`src/api/tokenStore.ts`), never in localStorage/sessionStorage. XSS should not be able to harvest a persistent credential. Refresh survives page reload because the backend's HttpOnly `tm_refresh` cookie is still valid; the app performs a silent `/auth/refresh` on mount (`AuthProvider`).
 - `apiFetch` (`src/api/client.ts`) attaches `Authorization: Bearer …` when a token exists, transparently refreshes-and-retries **once** on 401, and clears the token when refresh itself fails. Concurrent refreshes are serialised into a single in-flight promise. Many stale requests firing at once would otherwise walk into the backend's family-revocation trap.
@@ -216,7 +227,7 @@ These are non-obvious choices that future code must keep consistent.
 
 **RAG service:**
 
-- The service owns its own `kb_documents` table, created with `IF NOT EXISTS` at startup, it does **not** read the backend's `ticket_embeddings`. Flyway lives with the Java service; a cross-service Flyway migration would couple the two deploys, and a schema mistake here would be able to corrupt ticket/auth data. The embedding dimension is templated into the DDL from `RAG_EMBEDDING_DIM` so a model swap is a config change plus a re-embed.
+- The service owns its own `kb_documents` table, created with `IF NOT EXISTS` at startup. The backend had a `ticket_embeddings` table for embeddings it was going to compute itself; it never did, and **V4 drops it** — the vector extension stays, because V2's `CREATE EXTENSION` is what makes this service's copy a no-op (see the compose startup ordering above). Flyway lives with the Java service; a cross-service Flyway migration would couple the two deploys, and a schema mistake here would be able to corrupt ticket/auth data. The embedding dimension is templated into the DDL from `RAG_EMBEDDING_DIM` so a model swap is a config change plus a re-embed.
 - Vectors are bound as `pgvector.Vector`, never as plain lists. A bare `list[float]` is sent as `float8[]`, which Postgres can only coerce when a target column supplies the type, so `INSERT` silently works while `embedding <=> %s` in the search query fails with "No operator matches the given name and argument types".
 - `AnthropicChat` passes **no `temperature`**. Claude Opus 5 (and every Opus 4.7+ model) rejects sampling parameters with a 400; determinism is steered by the prompt instead.
 - Auth is a single shared secret on `X-Internal-Key`, compared with `hmac.compare_digest`. Missing and wrong keys both return `401 unauthorized`. Inside the compose network, a foothold on another container shouldn't be able to enumerate whether a header is needed at all.
@@ -227,6 +238,7 @@ These are non-obvious choices that future code must keep consistent.
 
 ## Test conventions
 
+- **Prefer the seam to the container where one exists.** `TicketTriageServiceTest` drives every triage branch against a fake `TicketTriageGateway` in ~25ms; the same cases through Testcontainers took seconds. Reach for an integration test when the thing under test *is* the database contract.
 - **Integration tests use Testcontainers, not mocks.** The `TestcontainersConfiguration` spins up a real pgvector container; tests like `AuthFlowIntegrationTest` hit the real DB. Do **not** introduce `@MockBean` on repositories. The original CLAUDE.md guidance to mock the DB is superseded.
 - Tests must annotate `@ActiveProfiles("test")`. The test profile sets a fixed `JWT_SECRET`, dials BCrypt strength to 4 (production minimum is 12), and uses a known schema.
 - Do **not** put `@Transactional` on integration test classes that exercise services using `Propagation.REQUIRES_NEW` (e.g. failed-login bookkeeping, family revocation). Spring's test-class transaction rolls back the outer transaction, but REQUIRES_NEW inner transactions can't see uncommitted outer state. Tests fail with confusing "user not found" errors. Use explicit `@BeforeEach` cleanup via `repository.deleteAllInBatch()` instead.

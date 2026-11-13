@@ -1,10 +1,9 @@
 package com.ticketmind.backend.common.web;
 
 import com.ticketmind.backend.common.exception.ApiException;
-import com.ticketmind.backend.common.exception.RateLimitExceededException;
+import com.ticketmind.backend.common.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -23,13 +22,9 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(ApiException.class)
 	public ResponseEntity<ApiError> handleApi(ApiException ex) {
-		HttpHeaders headers = new HttpHeaders();
-		if (ex instanceof RateLimitExceededException rl) {
-			headers.add(HttpHeaders.RETRY_AFTER, Long.toString(rl.retryAfterSeconds()));
-		}
 		return ResponseEntity
 				.status(ex.status())
-				.headers(headers)
+				.headers(ex.headers())
 				.body(ApiError.of(ex.status().value(), ex.code()));
 	}
 
@@ -41,7 +36,7 @@ public class GlobalExceptionHandler {
 				.toList();
 		return ResponseEntity
 				.status(HttpStatus.BAD_REQUEST)
-				.body(ApiError.of(HttpStatus.BAD_REQUEST.value(), "validation_error", fieldErrors));
+				.body(ApiError.of(ErrorCode.VALIDATION_ERROR.status().value(), ErrorCode.VALIDATION_ERROR.code(), fieldErrors));
 	}
 
 	// Method security (@PreAuthorize) throws inside the controller invocation,
@@ -54,7 +49,7 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex) {
 		log.debug("access denied: {}", ex.getMessage());
 		return ResponseEntity.status(HttpStatus.FORBIDDEN)
-				.body(ApiError.of(HttpStatus.FORBIDDEN.value(), "forbidden"));
+				.body(ApiError.of(ErrorCode.FORBIDDEN.status().value(), ErrorCode.FORBIDDEN.code()));
 	}
 
 	// A bad enum value or a malformed UUID in a path or query parameter fails
@@ -67,7 +62,7 @@ public class GlobalExceptionHandler {
 		// Only the parameter name is echoed. The rejected value is caller-supplied
 		// and has no business being reflected back.
 		return ResponseEntity.badRequest().body(ApiError.of(
-				HttpStatus.BAD_REQUEST.value(), "validation_error",
+				ErrorCode.VALIDATION_ERROR.status().value(), ErrorCode.VALIDATION_ERROR.code(),
 				List.of(new ApiError.FieldError(ex.getName(), "invalid"))));
 	}
 
@@ -75,7 +70,7 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiError> handleNoResource(NoResourceFoundException ex) {
 		return ResponseEntity
 				.status(HttpStatus.NOT_FOUND)
-				.body(ApiError.of(HttpStatus.NOT_FOUND.value(), "not_found"));
+				.body(ApiError.of(ErrorCode.NOT_FOUND.status().value(), ErrorCode.NOT_FOUND.code()));
 	}
 
 	@ExceptionHandler(Exception.class)
@@ -86,6 +81,6 @@ public class GlobalExceptionHandler {
 		log.error("Unhandled exception", ex);
 		return ResponseEntity
 				.status(HttpStatus.INTERNAL_SERVER_ERROR)
-				.body(ApiError.of(HttpStatus.INTERNAL_SERVER_ERROR.value(), "internal_error"));
+				.body(ApiError.of(ErrorCode.INTERNAL_ERROR.status().value(), ErrorCode.INTERNAL_ERROR.code()));
 	}
 }

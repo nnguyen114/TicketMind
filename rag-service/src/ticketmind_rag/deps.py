@@ -12,29 +12,14 @@ from __future__ import annotations
 import hmac
 
 from fastapi import Depends, Header, HTTPException, Request, status
-from psycopg_pool import AsyncConnectionPool
 
 from .config import Settings
-from .embeddings import Embedder
 from .kb import KbRepository
-from .llm import ChatModel
 from .triage import TriageService
 
 
 def get_settings_dep(request: Request) -> Settings:
     return request.app.state.settings  # type: ignore[no-any-return]
-
-
-def get_pool(request: Request) -> AsyncConnectionPool:
-    return request.app.state.pool  # type: ignore[no-any-return]
-
-
-def get_embedder(request: Request) -> Embedder:
-    return request.app.state.embedder  # type: ignore[no-any-return]
-
-
-def get_chat(request: Request) -> ChatModel:
-    return request.app.state.chat  # type: ignore[no-any-return]
 
 
 def get_kb(request: Request) -> KbRepository:

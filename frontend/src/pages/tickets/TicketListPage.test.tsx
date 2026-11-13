@@ -97,7 +97,7 @@ describe('TicketListPage', () => {
     );
 
     expect(await screen.findByText('Ticket page 0')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'in progress' }));
+    await userEvent.click(screen.getByRole('button', { name: 'In progress' }));
     await waitFor(() =>
       expect(screen.getByText(/Ticket page 0 \(IN_PROGRESS\)/)).toBeInTheDocument(),
     );

@@ -1,5 +1,6 @@
 package com.ticketmind.backend.rag;
 
+import com.ticketmind.backend.ticket.TicketLimits;
 import com.ticketmind.backend.rag.dto.TriageResultPayload;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -104,17 +105,33 @@ class RagClientTest {
 		server.verify();
 	}
 
+	/**
+	 * The RAG service answers 422 above 256 / 32000. RagClient used to truncate
+	 * to those, which could never fire because the request DTOs already cap
+	 * lower - and would have silently shortened a user's report if it had.
+	 * Truncation is gone; this is the constraint that replaced it.
+	 */
 	@Test
-	void triageTruncatesBodiesLongerThanTheRagServiceAccepts() {
+	void ticketLimitsStayWithinWhatTheRagServiceAccepts() {
+		assertThat(TicketLimits.TITLE_MAX)
+				.as("raising this past the RAG service's title cap would start producing 422s")
+				.isLessThanOrEqualTo(256);
+		assertThat(TicketLimits.BODY_MAX)
+				.as("raising this past the RAG service's body cap would start producing 422s")
+				.isLessThanOrEqualTo(32_000);
+	}
+
+	@Test
+	void triageSendsTheBodyThroughUnaltered() {
 		RagClient client = clientWith(true);
-		String longBody = "x".repeat(40_000);
+		String body = "x".repeat(TicketLimits.BODY_MAX);
 		server.expect(requestTo(BASE_URL + "/triage"))
-				.andExpect(jsonPath("$.body").value("x".repeat(32_000)))
+				.andExpect(jsonPath("$.body").value(body))
 				.andRespond(withSuccess("""
 						{"category":"c","priority":"LOW","summary":"s","suggested_resolution":"r","citations":[]}
 						""", MediaType.APPLICATION_JSON));
 
-		assertThat(client.triage(TICKET_ID, "t", longBody)).isPresent();
+		assertThat(client.triage(TICKET_ID, "t", body)).isPresent();
 		server.verify();
 	}
 

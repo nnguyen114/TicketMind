@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/useAuth';
 import { FormField } from '@/components/FormField';
+import { Button, ErrorText, PageHeading } from '@/components/ui';
 import { formatError } from '@/lib/errorMessages';
 
 const schema = z.object({
@@ -43,7 +44,7 @@ export function LoginPage() {
 
   return (
     <div className="mx-auto max-w-md">
-      <h1 className="text-2xl font-semibold text-slate-900 mb-6">Sign in</h1>
+      <PageHeading>Sign in</PageHeading>
       <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
         <FormField
           label="Email"
@@ -59,18 +60,10 @@ export function LoginPage() {
           {...register('password')}
           error={errors.password?.message}
         />
-        {serverError ? (
-          <p role="alert" className="text-sm text-red-600">
-            {serverError}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded-md bg-indigo-600 text-white px-4 py-2 font-medium hover:bg-indigo-500 disabled:opacity-60"
-        >
+        {serverError ? <ErrorText>{serverError}</ErrorText> : null}
+        <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? 'Signing in…' : 'Sign in'}
-        </button>
+        </Button>
       </form>
       <p className="mt-6 text-sm text-slate-600">
         Don’t have an account?{' '}
